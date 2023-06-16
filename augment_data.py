@@ -1,0 +1,122 @@
+# File Name: augment_data.py
+# Author: Christopher Parker
+# Created: Thu Jun 15, 2023 | 06:08P EDT
+# Last Modified: Thu Jun 15, 2023 | 09:03P EDT
+
+"""This script contains methods for augmenting a given tensor of time-series
+data with various strategies, such as Gaussian noise."""
+
+PATIENT_GROUP = 'Neither'
+NUM_PER_PATIENT = 100
+NUM_PATIENTS = 10
+NUM_POPS = 5
+METHOD = 'Uniform'
+NORMALIZE_STANDARDIZE = 'Standardize'
+
+import torch
+from torch.utils.data import DataLoader
+from get_nelson_data import NelsonData
+from itertools import combinations
+
+def uniform_noise(input_tensor, noise_magnitude):
+    output_tensor = torch.zeros_like(input_tensor)
+    for idx, pt in enumerate(input_tensor):
+        scaled = pt*noise_magnitude
+        noise_range = 2*scaled
+        lower_bound = pt - scaled
+        output_tensor[idx] = torch.rand((1,))*noise_range + lower_bound
+    return output_tensor
+
+def generate_augmented_dataset(input_data, number, method, noise_magnitude=0.1):
+    vpop = torch.zeros((number, 11, 3), dtype=float)
+    match method:
+        case 'Uniform':
+            for vpt in vpop:
+                vpt[...,0] = input_data[...,0]
+                vpt[...,1] = uniform_noise(input_data[...,1], noise_magnitude)
+                vpt[...,2] = uniform_noise(input_data[...,2], noise_magnitude)
+        case _:
+            print("Unsupported augmentation strategy")
+
+    return vpop
+
+def generate_virtual_population(patient_group, num_per_patient, test_pop_nums,
+                                method, shuffle=True):
+    dataset = NelsonData(patient_groups=[patient_group], normalize_standardize=NORMALIZE_STANDARDIZE)
+    loader = DataLoader(dataset, batch_size=1, shuffle=shuffle)
+    vpop = torch.zeros((0, 11, 3), dtype=float)
+    test_pop = torch.zeros((0, 11, 3))
+    for idx, batch in enumerate(loader):
+        batch = batch[0]
+        if idx in test_pop_nums:
+            test_pop = torch.cat((test_pop, batch), 0)
+            continue
+        vpop = torch.cat(
+            (
+                vpop,
+                generate_augmented_dataset(batch, num_per_patient, method)
+            ), 0
+        )
+
+    return torch.cat((vpop, test_pop), 0)
+
+def generate_multiple_populations(num_pops):
+    for i in range(num_pops):
+        vpop_and_test = generate_virtual_population(PATIENT_GROUP, NUM_PER_PATIENT, NUM_PATIENTS, METHOD)
+        torch.save(vpop_and_test, f'Virtual Populations/{PATIENT_GROUP}_{METHOD}_{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_{NUM_PATIENTS}_{i+1}.txt')
+
+def generate_all_pop_combinations():
+    for combination in combinations(
+            range(
+                15 if PATIENT_GROUP in ['Control', 'Melancholic'] else 14
+            ), 5 if PATIENT_GROUP in ['Control', 'Melancholic'] else 4
+    ):
+        vpop_and_test = generate_virtual_population(
+            PATIENT_GROUP, NUM_PER_PATIENT, combination, METHOD, shuffle=False
+        )
+        torch.save(
+            vpop_and_test,
+            f'Virtual Populations/{PATIENT_GROUP}_{METHOD}_'
+            f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
+            f'testPatients{combination}.txt'
+        )
+
+
+if __name__ == '__main__':
+    # Generate a virtual population based on the parameters given
+    # vpop_and_test = generate_virtual_population(PATIENT_GROUP, NUM_PER_PATIENT, NUM_PATIENTS, METHOD)
+
+    # Save the virtual population and respective training population to files
+    # torch.save(vpop_and_test, f'Virtual Populations/{PATIENT_GROUP}_{METHOD}_{NUM_PER_PATIENT}_{NUM_PATIENTS}_{POP_NUMBER}.txt')
+
+    # for NORMALIZE_STANDARDIZE in ['Normalize', 'Standardize', 'None']:
+    for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
+        generate_all_pop_combinations()
+
+    pass
+
+#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
+#                                 MIT License                                 #
+#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
+#     Copyright (c) 2022 Christopher John Parker <parkecp@mail.uc.edu>        #
+#                                                                             #
+# Permission is hereby granted, free of charge, to any person obtaining a     #
+# copy of this software and associated documentation files (the "Software"),  #
+# to deal in the Software without restriction, including without limitation   #
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,    #
+# and/or sell copies of the Software, and to permit persons to whom the       #
+# Software is furnished to do so, subject to the following conditions:        #
+#                                                                             #
+# The above copyright notice and this permission notice shall be included in  #
+# all copies or substantial portions of the Software.                         #
+#                                                                             #
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR  #
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,    #
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE #
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER      #
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING     #
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER         #
+# DEALINGS IN THE SOFTWARE.                                                   #
+#                                                                             #
+#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
+
