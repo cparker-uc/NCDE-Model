@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Fri Jun 16, 2023 | 10:48P EDT
+# Last Modified: Sat Jun 17, 2023 | 12:44P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -11,7 +11,7 @@ HDIM = 32
 OUTPUT_CHANNELS = 1
 
 # Training hyperparameters
-ITERS = 500
+ITERS = 300
 LR = 1e-3
 DECAY = 1e-6
 OPT_RESET = None
@@ -26,6 +26,7 @@ NUM_PER_PATIENT = 100
 NUM_PATIENTS = 10
 POP_NUMBER = 1
 BATCH_SIZE = 100
+LABEL_SMOOTHING = 0.1
 
 
 # from IPython.core.debugger import set_trace
@@ -35,11 +36,10 @@ import torch
 import torchcde
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
+import pandas as pd
 
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torchdyn.core import NeuralODE
 from typing import Tuple
 from augment_data import NORMALIZE_STANDARDIZE, NUM_PATIENTS
 from get_nelson_data import NelsonData, VirtualPopulation
@@ -135,6 +135,7 @@ class NeuralCDE(torch.nn.Module):
 
         # Convert z_T to y with the readout linear map
         pred_y = self.readout(z_T)
+
         return pred_y
 
 class NDEOutputLayer(nn.Module):
@@ -165,7 +166,9 @@ def main(virtual=True):
             normalize_standardize=NORMALIZE_STANDARDIZE,
             num_per_patient=NUM_PER_PATIENT,
             num_patients=NUM_PATIENTS,
-            pop_number=POP_NUMBER
+            pop_number=POP_NUMBER,
+            test=False,
+            label_smoothing=LABEL_SMOOTHING
         )
     # Time points we need the solver to output
     t_eval = dataset[0][0][:,0].contiguous()
@@ -232,14 +235,16 @@ def main(virtual=True):
                 f'{POP_NUMBER}_'
                 f'{NUM_PER_PATIENT}perPatient_'
                 f'batchsize{BATCH_SIZE}_'
-                f'{itr}ITER_{NORMALIZE_STANDARDIZE}.txt'
+                f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}.txt'
             )
             with open(f'Network States (VPOP Training)/NN_state_2HL_128nodes_'
                       f"NCDE_{METHOD}{'Virtual' if virtual else 'Real'}"
                       f'{PATIENT_GROUP}{POP_NUMBER}_'
                       f'{NUM_PER_PATIENT}perPatient_'
                       f'batchsize{BATCH_SIZE}_'
-                      f'{itr}ITER_{NORMALIZE_STANDARDIZE}_setup.txt',
+                      f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+                      f'smoothing{LABEL_SMOOTHING}_setup.txt',
                       'w+') as file:
                 file.write(
                     f'Model Setup for {METHOD} '
@@ -267,6 +272,7 @@ def main(virtual=True):
                     f' per real patient={NUM_PER_PATIENT}\n'
                     'Number of real patients sampled from each group='
                     f'{NUM_PATIENTS}\n'
+                    f'Label smoothing factor={LABEL_SMOOTHING}\n'
                     f'Virtual population number used={POP_NUMBER}\n'
                     f'Training batch size={BATCH_SIZE}\n'
                     'Training Results:\n'
@@ -277,12 +283,147 @@ def main(virtual=True):
                 )
 
 
+def test(method, patient_groups, pop_number, num_per_patient, batch_size,
+         normalize_standardize, num_patients, input_channels, hdim,
+         output_channels, max_itr, label_smoothing=0,
+         state_dir='Network States (VPOP Training)'):
+    patient_group = patient_groups[1]
+    dataset = VirtualPopulation(
+        patient_groups=patient_groups,
+        method=method,
+        normalize_standardize=normalize_standardize,
+        num_per_patient=num_per_patient,
+        num_patients=num_patients,
+        pop_number=pop_number,
+        test=True,
+        label_smoothing=label_smoothing
+    )
+    # Time points we need the solver to output
+    t_eval = dataset[0][0][:,0].contiguous()
+    loader = DataLoader(dataset, batch_size=len(dataset))
+
+    # DataFrame to track performance (with a row for each network state at
+    #  multiples of 100 iterations)
+    performance_df = pd.DataFrame(
+        columns=(
+            'Iterations',
+            'Success',
+            'Prediction',
+            'Error',
+            'Cross Entropy Loss',
+            'Success %'
+        )
+    )
+
+    for itr in range(1,max_itr+1):
+        # Pandas Series to allow us to insert the number of iterations for each
+        #  group of predicitons only in the first row of the group
+        iterations = pd.Series((itr*100,), index=(1,))
+
+        model = NeuralCDE(
+            input_channels, hdim, output_channels, t_interval=t_eval
+        ).double()
+        try:
+            state_dict = torch.load(
+                os.path.join(state_dir, f'NN_state_2HL_128nodes_NCDE_'
+                             f"{method}Virtual{patient_group}{pop_number}_"
+                             f'{num_per_patient}perPatient_'
+                             f'batchsize{batch_size}_'
+                             f'{itr*100}ITER_{normalize_standardize}.txt')
+            )
+        except FileNotFoundError:
+            break
+
+        model.load_state_dict(state_dict)
+
+        for batch in loader:
+            (data, label) = batch
+            coeffs = torchcde.\
+                hermite_cubic_coefficients_with_backward_differences(
+                    data, t=t_eval
+                )
+
+            pred_y = model(coeffs).squeeze(-1)
+            pred_y = torch.sigmoid(pred_y)
+
+            loss = binary_cross_entropy_with_logits(pred_y, label)
+            error = torch.abs(label - pred_y)
+
+            # Rounding the predicted y to see if it was successful
+            rounded_y = torch.round(pred_y)
+            success = [not y for y in torch.abs(label - rounded_y)]
+
+            # Create Pandas Series objects so that we can insert these only
+            #  in the last row of each iteration prediction group
+            cross_entropy_loss = pd.Series(
+                (loss.item(),),
+                index=(len(pred_y),)
+            )
+            success_pct = pd.Series(
+                (sum(success)/len(pred_y),),
+                index=(len(pred_y),)
+            )
+
+            tmp_df = pd.DataFrame(
+                data={
+                    'Iterations': iterations,
+                    'Success': success,
+                    'Prediction': pred_y,
+                    'Error': error,
+                    'Cross Entropy Loss': cross_entropy_loss,
+                    'Success %': success_pct
+                }, index=range(1, len(pred_y)+1)
+            )
+
+            # Add the performance metrics to the DataFrame as a new row
+            performance_df = pd.concat(
+                (
+                    performance_df,
+                    tmp_df
+                ),
+            )
+
+    else:
+        with pd.ExcelWriter(
+            f'NCDE_{method}Virtual{patient_group}{pop_number}vsControl'
+            f'_classification_{num_per_patient}perPatient_batchsize{batch_size}_'
+            f'{normalize_standardize}.xlsx'
+        ) as writer:
+            performance_df.to_excel(writer)
+
+
+def run_multiple_tests(patient_groups, pop_numbers, max_itr):
+    with torch.no_grad():
+        for groups in patient_groups:
+            for pop_number in pop_numbers:
+                test(
+                    method='Uniform',
+                    patient_groups=groups,
+                    pop_number=pop_number,
+                    num_per_patient=100,
+                    batch_size=100,
+                    normalize_standardize='Standardize',
+                    num_patients=10,
+                    input_channels=3,
+                    hdim=32,
+                    output_channels=1,
+                    max_itr=max_itr,
+                    label_smoothing=0
+                )
+
+
 if __name__ == "__main__":
-    for POP_NUMBER in range(1,6):
-        for PATIENT_GROUPS in [['Control', 'Atypical'], ['Control', 'Melancholic'],
-                               ['Control', 'Neither']]:
-            PATIENT_GROUP = PATIENT_GROUPS[1]
-            main()
+    # for POP_NUMBER in range(1,6):
+    #     for PATIENT_GROUPS in [['Control', 'Atypical'], ['Control', 'Melancholic'],
+    #                            ['Control', 'Neither']]:
+    #         PATIENT_GROUP = PATIENT_GROUPS[1]
+    #         main()
+    run_multiple_tests(
+        patient_groups=[['Control', 'Atypical'], ['Control', 'Melancholic'],
+                        ['Control', 'Neither']],
+        pop_numbers=[1,2,3],
+        max_itr=5 # Pass the max number of 100 iteration steps that were run
+    )
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #

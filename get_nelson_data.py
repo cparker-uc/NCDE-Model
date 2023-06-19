@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Thu Jun 15, 2023 | 07:42P EDT
+# Last Modified: Sat Jun 17, 2023 | 12:44P EDT
 
 import os
 import torch
@@ -136,32 +136,61 @@ class NelsonData(Dataset):
 
 class VirtualPopulation(Dataset):
     def __init__(self, patient_groups, method, normalize_standardize,
-                 num_per_patient, num_patients, pop_number, label_smoothing=0):
+                 num_per_patient, num_patients, pop_number, test=False,
+                 label_smoothing=0):
         self.patient_groups = patient_groups
         self.num_per_patient = num_per_patient
         self.num_patients = num_patients
         self.X = torch.zeros((0, 11, 3), dtype=float)
         self.y = torch.zeros((0,), dtype=float)
+        self.test = test
 
         for group in self.patient_groups:
-            vpop, _ = load_vpop(
-                group, method, normalize_standardize,
-                num_per_patient, num_patients, pop_number
-            )
-            self.X = torch.cat((self.X, vpop), 0)
-            if group == 'Control':
-                self.y = torch.cat(
-                    (self.y, torch.zeros(num_per_patient*num_patients)+label_smoothing), 0
+            if self.test:
+                _, data = load_vpop(
+                    group, method, normalize_standardize,
+                    num_per_patient, num_patients, pop_number
                 )
             else:
-                self.y = torch.cat(
-                    (self.y, torch.ones(num_per_patient*num_patients)-label_smoothing), 0
+                data, _ = load_vpop(
+                    group, method, normalize_standardize,
+                    num_per_patient, num_patients, pop_number
                 )
+            self.X = torch.cat((self.X, data), 0)
+            if group == 'Control':
+                if self.test:
+                    self.y = torch.cat(
+                        (self.y, torch.zeros(15 - num_patients)+label_smoothing), 0
+                    )
+                else:
+                    self.y = torch.cat(
+                        (self.y, torch.zeros(num_per_patient*num_patients)+label_smoothing), 0
+                    )
+            else:
+                if self.test:
+                    if group == 'Melancholic':
+                        self.y = torch.cat(
+                            (self.y, torch.ones(15 - num_patients)-label_smoothing), 0
+                        )
+                    else:
+                        self.y = torch.cat(
+                            (self.y, torch.ones(14 - num_patients)-label_smoothing), 0
+                        )
+                else:
+                    self.y = torch.cat(
+                        (self.y, torch.ones(num_per_patient*num_patients)-label_smoothing), 0
+                    )
 
     def __len__(self):
         length = 0
         for group in self.patient_groups:
-            length += self.num_per_patient*self.num_patients
+            if self.test:
+                if group in ['Control', 'Melancholic']:
+                    length += 15 - self.num_patients
+                else:
+                    length += 14 - self.num_patients
+            else:
+                length += self.num_per_patient*self.num_patients
 
         return length
 
@@ -177,9 +206,9 @@ def load_vpop(patient_group, method, normalize_standardize, num_per_patient,
                                 f'_{normalize_standardize}_{num_per_patient}_'
                                 f'{num_patients}_{pop_number}.txt')
     vpop = vpop_and_train[:1000,...]
-    train = vpop_and_train[1000:,...]
+    test = vpop_and_train[1000:,...]
 
-    return vpop, train
+    return vpop, test
 
 
 def normalize_time_series(series_tensor):
