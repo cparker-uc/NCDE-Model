@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Sat Jun 17, 2023 | 12:44P EDT
+# Last Modified: Mon Jun 19, 2023 | 01:38P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -26,7 +26,8 @@ NUM_PER_PATIENT = 100
 NUM_PATIENTS = 10
 POP_NUMBER = 1
 BATCH_SIZE = 100
-LABEL_SMOOTHING = 0.1
+LABEL_SMOOTHING = 0
+DROPOUT = 0.2
 
 
 # from IPython.core.debugger import set_trace
@@ -38,6 +39,7 @@ import torch.nn as nn
 import torch.optim as optim
 import pandas as pd
 
+from itertools import combinations
 from torch.utils.data import DataLoader
 from torch.nn.functional import binary_cross_entropy_with_logits
 from typing import Tuple
@@ -95,6 +97,7 @@ class NeuralCDE(torch.nn.Module):
         # This is essentially augmenting the dimension with a linear map,
         #  something Massaroli et al warned against
         self.initial = torch.nn.Linear(input_channels, hidden_channels)
+        self.dropout = torch.nn.Dropout(p=DROPOUT, inplace=True)
 
         # self.readout represents l_{theta}^1 in the equation
         #  y ~ l_{theta}^1 (z_T)
@@ -121,6 +124,7 @@ class NeuralCDE(torch.nn.Module):
         #   (a linear map from the first observation)
         X0 = X.evaluate(X.interval[0]) # evaluate the spline at its first point
         z0 = self.initial(X0)
+        self.dropout(z0)
 
         # Solve the CDE
         z_T = torchcde.cdeint(
@@ -150,14 +154,39 @@ class NDEOutputLayer(nn.Module):
         return sol
 
 
-def main(virtual=True):
+def main(virtual=True, use_combinations=False):
     device = torch.device('cpu')
 
+    # Ensure that these variables are not unbound, so that we can reference them
+    #  when writing the setup file
+    control_combination = None
+    mdd_combination = None
     if not virtual:
         dataset = NelsonData(
             'Nelson TSST Individual Patient Data',
             patient_groups=PATIENT_GROUPS,
             normalize_standardize='standardize'
+        )
+    elif use_combinations:
+        all_combos_control_melancholic = combinations(range(15), 5)
+        all_combos_atypical_neither = combinations(range(14), 4)
+
+        random_control_melancholic = torch.randint(0, 3002, (1,))
+        random_atypical_neither = torch.randint(0, 1000, (1,))
+
+        control_combination = [combo for combo in all_combos_control_melancholic][random_control_melancholic]
+        mdd_combination = [combo for combo in all_combos_control_melancholic][random_control_melancholic] if PATIENT_GROUPS[1] == 'Melancholic' else [combo for combo in all_combos_atypical_neither][random_atypical_neither]
+
+        dataset = VirtualPopulation(
+            patient_groups=PATIENT_GROUPS,
+            method=METHOD,
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+            num_per_patient=NUM_PER_PATIENT,
+            num_patients=NUM_PATIENTS,
+            control_combination=control_combination,
+            mdd_combination=mdd_combination,
+            test=False,
+            label_smoothing=LABEL_SMOOTHING
         )
     else:
         dataset = VirtualPopulation(
@@ -186,7 +215,10 @@ def main(virtual=True):
     loss_over_time = []
 
     start_time = time.time()
-    print(f'Starting Training on {PATIENT_GROUP} Population Number {POP_NUMBER}')
+    if use_combinations:
+        print(f'Starting Training on {PATIENT_GROUP} Test Groups: Control {control_combination} {PATIENT_GROUP} {mdd_combination}')
+    else:
+        print(f'Starting Training on {PATIENT_GROUP} Population Number {POP_NUMBER}')
     for itr in range(1, ITERS+1):
         for j, (data, labels) in enumerate(dataloader):
             coeffs = torchcde.\
@@ -232,19 +264,21 @@ def main(virtual=True):
                 model.state_dict(),
                 f'Network States (VPOP Training)/NN_state_2HL_128nodes_NCDE_'
                 f"{METHOD}{'Virtual' if virtual else 'Real'}{PATIENT_GROUP}"
-                f'{POP_NUMBER}_'
+                f'{POP_NUMBER if not use_combinations else [control_combination, mdd_combination]}_'
                 f'{NUM_PER_PATIENT}perPatient_'
                 f'batchsize{BATCH_SIZE}_'
                 f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-                f'smoothing{LABEL_SMOOTHING}.txt'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
             )
             with open(f'Network States (VPOP Training)/NN_state_2HL_128nodes_'
                       f"NCDE_{METHOD}{'Virtual' if virtual else 'Real'}"
-                      f'{PATIENT_GROUP}{POP_NUMBER}_'
+                      f'{PATIENT_GROUP}{POP_NUMBER if not use_combinations else [control_combination, mdd_combination]}_'
                       f'{NUM_PER_PATIENT}perPatient_'
                       f'batchsize{BATCH_SIZE}_'
                       f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-                      f'smoothing{LABEL_SMOOTHING}_setup.txt',
+                      f'smoothing{LABEL_SMOOTHING}_setup_'
+                      f'dropout{DROPOUT}.txt',
                       'w+') as file:
                 file.write(
                     f'Model Setup for {METHOD} '
@@ -262,6 +296,8 @@ def main(virtual=True):
                     f'Learning rate={LR}\n'
                     f'Weight decay={DECAY}\n'
                     f'Optimizer reset frequency={OPT_RESET}\n\n'
+                    'Dropout probability '
+                    f'(after initial linear layer before NCDE): {DROPOUT}\n'
                     'Training Data Selection Parameters\n'
                     '(If not virtual, the only important params are the groups'
                     ' and whether data was normalized/standardized)\n'
@@ -274,6 +310,9 @@ def main(virtual=True):
                     f'{NUM_PATIENTS}\n'
                     f'Label smoothing factor={LABEL_SMOOTHING}\n'
                     f'Virtual population number used={POP_NUMBER}\n'
+                    'Test Patient Combinations:\n'
+                    f'Control: {control_combination}\n'
+                    f'{PATIENT_GROUP}: {mdd_combination}\n'
                     f'Training batch size={BATCH_SIZE}\n'
                     'Training Results:\n'
                     f'Runtime={runtime}\n'
@@ -285,7 +324,7 @@ def main(virtual=True):
 
 def test(method, patient_groups, pop_number, num_per_patient, batch_size,
          normalize_standardize, num_patients, input_channels, hdim,
-         output_channels, max_itr, label_smoothing=0,
+         output_channels, max_itr, label_smoothing=0.,
          state_dir='Network States (VPOP Training)'):
     patient_group = patient_groups[1]
     dataset = VirtualPopulation(
@@ -296,7 +335,6 @@ def test(method, patient_groups, pop_number, num_per_patient, batch_size,
         num_patients=num_patients,
         pop_number=pop_number,
         test=True,
-        label_smoothing=label_smoothing
     )
     # Time points we need the solver to output
     t_eval = dataset[0][0][:,0].contiguous()
@@ -329,9 +367,11 @@ def test(method, patient_groups, pop_number, num_per_patient, batch_size,
                              f"{method}Virtual{patient_group}{pop_number}_"
                              f'{num_per_patient}perPatient_'
                              f'batchsize{batch_size}_'
-                             f'{itr*100}ITER_{normalize_standardize}.txt')
+                             f'{itr*100}ITER_{normalize_standardize}'
+                             f'_smoothing{label_smoothing}.txt')
             )
-        except FileNotFoundError:
+        except FileNotFoundError as e:
+            print(f'Caught error: {e}')
             break
 
         model.load_state_dict(state_dict)
@@ -385,9 +425,9 @@ def test(method, patient_groups, pop_number, num_per_patient, batch_size,
 
     else:
         with pd.ExcelWriter(
-            f'NCDE_{method}Virtual{patient_group}{pop_number}vsControl'
+            f'Classification Results/Augmented Data/NCDE_{method}Virtual{patient_group}{pop_number}vsControl'
             f'_classification_{num_per_patient}perPatient_batchsize{batch_size}_'
-            f'{normalize_standardize}.xlsx'
+            f'{normalize_standardize}_smoothing{label_smoothing}.xlsx'
         ) as writer:
             performance_df.to_excel(writer)
 
@@ -408,22 +448,34 @@ def run_multiple_tests(patient_groups, pop_numbers, max_itr):
                     hdim=32,
                     output_channels=1,
                     max_itr=max_itr,
-                    label_smoothing=0
+                    label_smoothing=0.1,
+                    state_dir='Network States (VPOP Training)/Uniform - 100 per Patient - 100 Batchsize - Standardized Data - 0.1 Smoothing'
                 )
 
 
 if __name__ == "__main__":
-    # for POP_NUMBER in range(1,6):
-    #     for PATIENT_GROUPS in [['Control', 'Atypical'], ['Control', 'Melancholic'],
-    #                            ['Control', 'Neither']]:
+    all_combos_control_melancholic = combinations(range(15), 5)
+    all_combos_atypical_neither = combinations(range(14), 4)
+
+    random_control_melancholic = torch.randint(0, 3002, (1,))
+    random_atypical_neither = torch.randint(0, 1000, (1,))
+
+    [combo for combo in all_combos_control_melancholic][random_control_melancholic]
+    for PATIENT_GROUPS in [['Control', 'Atypical'], ['Control', 'Melancholic'],
+                           ['Control', 'Neither']]:
+        PATIENT_GROUP = PATIENT_GROUPS[1]
+        main(use_combinations=True)
+    # for POP_NUMBER in range(1,3):
+        # for PATIENT_GROUPS in [['Control', 'Atypical'], ['Control', 'Melancholic'],
+        #                        ['Control', 'Neither']]:
     #         PATIENT_GROUP = PATIENT_GROUPS[1]
     #         main()
-    run_multiple_tests(
-        patient_groups=[['Control', 'Atypical'], ['Control', 'Melancholic'],
-                        ['Control', 'Neither']],
-        pop_numbers=[1,2,3],
-        max_itr=5 # Pass the max number of 100 iteration steps that were run
-    )
+    # run_multiple_tests(
+    #     patient_groups=[['Control', 'Atypical'], ['Control', 'Melancholic'],
+    #                     ['Control', 'Neither']],
+    #     pop_numbers=[1,2,3],
+    #     max_itr=3 # Pass the max number of 100 iteration steps that were run
+    # )
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #
