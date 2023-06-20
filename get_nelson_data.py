@@ -137,13 +137,17 @@ class NelsonData(Dataset):
 class VirtualPopulation(Dataset):
     def __init__(self, patient_groups, method, normalize_standardize,
                  num_per_patient, num_patients, pop_number=None,
-                 control_combination=None, mdd_combination=None, test=False, label_smoothing=0.):
+                 control_combination=None, mdd_combination=None,
+                 fixed_perms=False, test=False, label_smoothing=0.):
         self.patient_groups = patient_groups
         self.num_per_patient = num_per_patient
         self.num_patients = num_patients
         self.X = torch.zeros((0, 11, 3), dtype=float)
         self.y = torch.zeros((0,), dtype=float)
         self.test = test
+        self.combinations = None
+        if control_combination and mdd_combination:
+            self.combinations = control_combination + mdd_combination
 
         for group in self.patient_groups:
             if self.test:
@@ -155,7 +159,9 @@ class VirtualPopulation(Dataset):
                 elif control_combination and mdd_combination:
                     _, data = load_vpop_combinations(
                         group, method, normalize_standardize,
-                        num_per_patient, control_combination if group == 'Control' else mdd_combination
+                        num_per_patient,
+                        control_combination if group == 'Control' else mdd_combination,
+                        fixed_perms=fixed_perms
                     )
                 else:
                     print('Need a pop_number or test patient combination')
@@ -168,7 +174,9 @@ class VirtualPopulation(Dataset):
                 elif control_combination and mdd_combination:
                     data, _ = load_vpop_combinations(
                         group, method, normalize_standardize,
-                        num_per_patient, control_combination if group == 'Control' else mdd_combination
+                        num_per_patient,
+                        control_combination if group == 'Control' else mdd_combination,
+                        fixed_perms=fixed_perms
                     )
                 else:
                     print('Need a pop_number or test patient combination')
@@ -205,6 +213,12 @@ class VirtualPopulation(Dataset):
                     length += 15 - self.num_patients
                 else:
                     length += 14 - self.num_patients
+            if self.combinations:
+                len_mdd = len(self.combinations) - 5
+                if group in ['Control', 'Melancholic']:
+                    length += (10*self.num_per_patient)
+                else:
+                    length += (14 - len_mdd)*self.num_per_patient
             else:
                 length += self.num_per_patient*self.num_patients
 
@@ -226,10 +240,16 @@ def load_vpop(patient_group, method, normalize_standardize, num_per_patient,
 
 
 def load_vpop_combinations(patient_group, method, normalize_standardize, num_per_patient,
-              combination):
-    vpop_and_train = torch.load(f'Virtual Populations/{patient_group}_{method}'
-                                f'_{normalize_standardize}_{num_per_patient}_'
-                                f'testPatients{combination}.txt')
+              combination, fixed_perms):
+    if fixed_perms:
+        vpop_and_train = torch.load(f'Virtual Populations/{patient_group}'
+                                    f'_{method}'
+                                    f'_{normalize_standardize}_{num_per_patient}_'
+                                    f'testPatients{combination}_fixedperms.txt')
+    else:
+        vpop_and_train = torch.load(f'Virtual Populations/{patient_group}_{method}'
+                                    f'_{normalize_standardize}_{num_per_patient}_'
+                                    f'testPatients{combination}.txt')
     vpop = vpop_and_train[:1000,...]
     test = vpop_and_train[1000:,...]
 

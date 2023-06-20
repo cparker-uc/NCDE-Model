@@ -1,7 +1,7 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Thu Jun 15, 2023 | 09:03P EDT
+# Last Modified: Mon Jun 19, 2023 | 06:04P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
@@ -37,6 +37,7 @@ def generate_augmented_dataset(input_data, number, method, noise_magnitude=0.1):
                 vpt[...,2] = uniform_noise(input_data[...,2], noise_magnitude)
         case _:
             print("Unsupported augmentation strategy")
+            return
 
     return vpop
 
@@ -82,6 +83,44 @@ def generate_all_pop_combinations():
         )
 
 
+def generate_3combinations():
+    perm_len = 5
+    random_permutation = torch.randperm(15 if PATIENT_GROUP in ['Control', 'Melancholic'] else 14)
+
+    random_combo1 = random_permutation[:perm_len]
+    vpop_and_test1 = generate_virtual_population(
+        PATIENT_GROUP, NUM_PER_PATIENT, random_combo1, METHOD, shuffle=False
+    )
+    torch.save(
+        vpop_and_test1,
+        f'Virtual Populations/{PATIENT_GROUP}-1of3_{METHOD}_'
+        f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
+        f'testPatients{tuple(random_combo1.tolist())}.txt'
+    )
+
+    random_combo2 = random_permutation[perm_len:(2*perm_len)]
+    vpop_and_test2 = generate_virtual_population(
+        PATIENT_GROUP, NUM_PER_PATIENT, random_combo2, METHOD, shuffle=False
+    )
+    torch.save(
+        vpop_and_test2,
+        f'Virtual Populations/{PATIENT_GROUP}-2of3_{METHOD}_'
+        f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
+        f'testPatients{tuple(random_combo2.tolist())}.txt'
+    )
+
+    random_combo3 = random_permutation[(2*perm_len):]
+    vpop_and_test3 = generate_virtual_population(
+        PATIENT_GROUP, NUM_PER_PATIENT, random_combo3, METHOD, shuffle=False
+    )
+    torch.save(
+        vpop_and_test3,
+        f'Virtual Populations/{PATIENT_GROUP}-3of3_{METHOD}_'
+        f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
+        f'testPatients{tuple(random_combo3.tolist())}.txt'
+    )
+
+
 if __name__ == '__main__':
     # Generate a virtual population based on the parameters given
     # vpop_and_test = generate_virtual_population(PATIENT_GROUP, NUM_PER_PATIENT, NUM_PATIENTS, METHOD)
@@ -90,8 +129,11 @@ if __name__ == '__main__':
     # torch.save(vpop_and_test, f'Virtual Populations/{PATIENT_GROUP}_{METHOD}_{NUM_PER_PATIENT}_{NUM_PATIENTS}_{POP_NUMBER}.txt')
 
     # for NORMALIZE_STANDARDIZE in ['Normalize', 'Standardize', 'None']:
+    # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
+    #     generate_all_pop_combinations()
+
     for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
-        generate_all_pop_combinations()
+        generate_3combinations()
 
     pass
 
