@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Tue Jun 20, 2023 | 06:29P EDT
+# Last Modified: Thu Jun 22, 2023 | 12:15P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -11,7 +11,7 @@ HDIM = 32
 OUTPUT_CHANNELS = 1
 
 # Training hyperparameters
-ITERS = 300
+ITERS = 200
 LR = 1e-3
 DECAY = 1e-6
 OPT_RESET = None
@@ -31,6 +31,7 @@ DROPOUT = 0.2
 
 
 # from IPython.core.debugger import set_trace
+from math import perm
 import os
 import time
 import torch
@@ -330,9 +331,9 @@ def main_given_perms(permutations):
 
     # Ensure that these variables are not unbound, so that we can reference them
     #  when writing the setup file
-    for combo in combinations_with_replacement([0,1,2], 2):
+    for combo in [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]:
         control_combination = tuple(permutations[0][combo[0]*5:(combo[0]+1)*5])
-        mdd_combination = tuple(permutations[1][combo[1]*5:((combo[1]+1)*5) if (combo[1]+1)*5 < len(permutations[1]) else len(permutations[1])-1])
+        mdd_combination = tuple(permutations[1][combo[1]*5:((combo[1]+1)*5) if (combo[1]+1)*5 < len(permutations[1]) else len(permutations[1])])
 
         dataset = VirtualPopulation(
             patient_groups=PATIENT_GROUPS,
@@ -407,7 +408,7 @@ def main_given_perms(permutations):
                 torch.save(
                     model.state_dict(),
                     f'Network States (VPOP Training)/NN_state_2HL_128nodes_NCDE_'
-                    f"{METHOD}Virtual{PATIENT_GROUP}"
+                    f"{METHOD}Virtual{PATIENT_GROUP}_"
                     f'Control{control_combination}_{PATIENT_GROUP}{mdd_combination}_'
                     f'{NUM_PER_PATIENT}perPatient_'
                     f'batchsize{BATCH_SIZE}_'
@@ -472,9 +473,23 @@ def test(method, patient_groups, num_per_patient, batch_size,
          normalize_standardize, num_patients, input_channels, hdim,
          output_channels, max_itr, control_combination=None,
          mdd_combination=None, pop_number=None, label_smoothing=0,
-         state_dir='Network States (VPOP Training)'):
+         fixed_perms=False, state_dir='Network States (VPOP Training)'):
+    device = torch.device('cpu')
     patient_group = patient_groups[1]
-    if control_combination and mdd_combination:
+    if fixed_perms:
+        dataset = VirtualPopulation(
+            patient_groups=patient_groups,
+            method=method,
+            normalize_standardize=normalize_standardize,
+            num_per_patient=num_per_patient,
+            num_patients=num_patients,
+            control_combination=control_combination,
+            mdd_combination=mdd_combination,
+            fixed_perms=True,
+            test=True,
+            label_smoothing=label_smoothing
+        )
+    elif control_combination and mdd_combination:
         dataset = VirtualPopulation(
             patient_groups=patient_groups,
             method=method,
@@ -537,12 +552,14 @@ def test(method, patient_groups, num_per_patient, batch_size,
             state_dict = torch.load(
                 os.path.join(state_dir, f'NN_state_2HL_128nodes_NCDE_'
                              f'{method}Virtual{patient_group}'
-                             f'{pop_number if not (control_combination and mdd_combination) else [control_combination, mdd_combination]}_'
+                             f"{pop_number if not (control_combination and mdd_combination) else ''}_"
+                             f"{('Control' + str(control_combination) + '_' + str(patient_group) + str(mdd_combination)) if fixed_perms else ''}_"
                              f'{num_per_patient}perPatient_'
                              f'batchsize{batch_size}_'
                              f'{itr*100}ITER_{normalize_standardize}_'
                              f'smoothing{label_smoothing}_'
-                             f'dropout{DROPOUT}.txt')
+                             f'dropout{DROPOUT}.txt'),
+                map_location=device
             )
         except FileNotFoundError as e:
             print(f'Caught error: {e}')
@@ -623,8 +640,40 @@ def run_multiple_tests(patient_groups, pop_numbers, max_itr):
                     hdim=32,
                     output_channels=1,
                     max_itr=max_itr,
-                    label_smoothing=0.1,
-                    state_dir='Network States (VPOP Training)/Uniform - 100 per Patient - 100 Batchsize - Standardized Data - 0.1 Smoothing'
+                    label_smoothing=0,
+                    state_dir='Network States (VPOP Training)/Uniform - 100 per Patient - 100 Batchsize - Standardized Data - 0 Smoothing - 0.2 Dropout - Fixed Permutations'
+                )
+
+
+def run_fixed_perms(patient_groups, pop_numbers, max_itr, perms):
+    with torch.no_grad():
+        for groups in patient_groups:
+            for combo in [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]:
+                control_combination = tuple(perms[0][combo[0]*5:(combo[0]+1)*5])
+                if groups[1] == 'Atypical':
+                    mdd_combination = tuple(perms[1][combo[1]*5:((combo[1]+1)*5) if (combo[1]+1)*5 < len(perms[1]) else len(perms[1])])
+                elif groups[1] == 'Melancholic':
+                    mdd_combination = tuple(perms[2][combo[1]*5:((combo[1]+1)*5) if (combo[1]+1)*5 < len(perms[2]) else len(perms[2])])
+                elif groups[1] == 'Neither':
+                    mdd_combination = tuple(perms[3][combo[1]*5:((combo[1]+1)*5) if (combo[1]+1)*5 < len(perms[3]) else len(perms[3])])
+                else:
+                    return
+                test(
+                    method='Uniform',
+                    patient_groups=groups,
+                    num_per_patient=100,
+                    batch_size=100,
+                    normalize_standardize='Standardize',
+                    num_patients=10,
+                    input_channels=3,
+                    hdim=32,
+                    output_channels=1,
+                    max_itr=max_itr,
+                    label_smoothing=0,
+                    mdd_combination=mdd_combination,
+                    control_combination=control_combination,
+                    fixed_perms=True,
+                    state_dir='Network States (VPOP Training)/Uniform - 100 per Patient - 100 Batchsize - Standardized Data - 0 Smoothing - 0.2 Dropout - Fixed Permutations'
                 )
 
 
@@ -638,15 +687,16 @@ if __name__ == "__main__":
 
     # TRAIN WITH GROUP OF 3 POPULATIONS WHERE EACH PATIENT IS LEFT OUT IN ONE
     #  GROUP
-    PATIENT_GROUPS = ['Control', 'Atypical']
-    PATIENT_GROUP = PATIENT_GROUPS[1]
-    perms = [
-        # Control
-        [13, 11,  8, 14,  6,  2, 12, 10,  5,  1,  0,  9,  3,  7,  4],
-        # Atypical
-        [ 0,  7, 12,  8, 11,  2,  6,  9,  3,  5,  4,  1, 13, 10]
-    ]
-    main_given_perms(perms)
+    # PATIENT_GROUPS = ['Control', 'Atypical']
+    # PATIENT_GROUP = PATIENT_GROUPS[1]
+    # perms = [
+    #     # Control
+    #     [13, 11,  8, 14,  6,  2, 12, 10,  5,  1,  0,  9,  3,  7,  4],
+    #     # Atypical
+    #     [ 0,  7, 12,  8, 11,  2,  6,  9,  3,  5,  4,  1, 13, 10]
+    # ]
+
+    # main_given_perms(perms)
     # TESTING WITH COMBINATIONS OF TEST PATIENTS
     # with torch.no_grad():
     #     test(
@@ -664,6 +714,24 @@ if __name__ == "__main__":
     #         mdd_combination=(1, 9, 10, 12, 14),
     #     )
 
+    # TESTING WITH FIXED COMBINATIONS OF TEST PATIENTS
+    permutations = [
+        # Control
+        [13, 11,  8, 14,  6,  2, 12, 10,  5,  1,  0,  9,  3,  7,  4],
+        # Atypical
+        [ 0,  7, 12,  8, 11,  2,  6,  9,  3,  5,  4,  1, 13, 10],
+        # Melancholic
+        [10, 13,  4,  2,  3, 12, 14,  6,  8,  9,  5,  7,  0, 11,  1],
+        # Neither
+        [ 5, 12,  7, 13, 11,  9,  4,  1,  0,  2,  3, 10,  6,  8]
+    ]
+    run_fixed_perms(
+        patient_groups=[['Control', 'Melancholic'],
+                        ['Control', 'Neither']],
+        pop_numbers=[1,2,3],
+        max_itr=1, # Pass the max number of 100 iteration steps that were run
+        perms=permutations
+    )
     # TEST WITH RANDOM TEST CASES
     # for POP_NUMBER in range(1,3):
     #     for PATIENT_GROUPS in [['Control', 'Atypical'], ['Control', 'Melancholic'],

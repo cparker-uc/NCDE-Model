@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Tue Jun 20, 2023 | 11:03P EDT
+# Last Modified: Thu Jun 22, 2023 | 12:05P EDT
 
 import os
 import torch
@@ -146,6 +146,7 @@ class VirtualPopulation(Dataset):
         self.y = torch.zeros((0,), dtype=float)
         self.test = test
         self.combinations = None
+        self.fixed_perms = fixed_perms
         if control_combination and mdd_combination:
             self.combinations = control_combination + mdd_combination
 
@@ -192,14 +193,19 @@ class VirtualPopulation(Dataset):
                     )
             else:
                 if self.test:
-                    if group == 'Melancholic':
+                    if self.fixed_perms:
                         self.y = torch.cat(
-                            (self.y, torch.ones(15 - num_patients)-label_smoothing), 0
+                            (self.y, torch.ones(len(mdd_combination))-label_smoothing), 0
                         )
                     else:
-                        self.y = torch.cat(
-                            (self.y, torch.ones(14 - num_patients)-label_smoothing), 0
-                        )
+                        if group == 'Melancholic':
+                            self.y = torch.cat(
+                                (self.y, torch.ones(15 - num_patients)-label_smoothing), 0
+                            )
+                        else:
+                            self.y = torch.cat(
+                                (self.y, torch.ones(14 - num_patients)-label_smoothing), 0
+                            )
                 else:
                     self.y = torch.cat(
                         (self.y, torch.ones(num_per_patient*num_patients)-label_smoothing), 0
@@ -207,6 +213,8 @@ class VirtualPopulation(Dataset):
 
     def __len__(self):
         length = 0
+        if self.fixed_perms and self.test:
+            return len(self.combinations)
         for group in self.patient_groups:
             if self.test:
                 if group in ['Control', 'Melancholic']:
@@ -250,8 +258,12 @@ def load_vpop_combinations(patient_group, method, normalize_standardize, num_per
         vpop_and_train = torch.load(f'Virtual Populations/{patient_group}_{method}'
                                     f'_{normalize_standardize}_{num_per_patient}_'
                                     f'testPatients{combination}.txt')
-    vpop = vpop_and_train[:1000,...]
-    test = vpop_and_train[1000:,...]
+    if patient_group in ['Atypical', 'Neither']:
+        vpop = vpop_and_train[:(14 - len(combination))*num_per_patient,...]
+        test = vpop_and_train[(14 - len(combination))*num_per_patient:,...]
+    else:
+        vpop = vpop_and_train[:1000,...]
+        test = vpop_and_train[1000:,...]
 
     return vpop, test
 
