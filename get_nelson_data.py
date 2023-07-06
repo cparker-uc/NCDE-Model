@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Thu Jul 06, 2023 | 01:56P EDT
+# Last Modified: Thu Jul 06, 2023 | 03:22P EDT
 
 import os
 import torch
@@ -223,10 +223,10 @@ class AblesonData(Dataset):
     def __len__(self):
         length = 0
         for group in self.patient_groups:
-            if group in ['Control', 'Melancholic']:
-                length += 15
+            if group == 'Control':
+                length += 37
             else:
-                length += 14
+                length += 13
 
         return length
 
@@ -336,6 +336,67 @@ class VirtualPopulation(Dataset):
         return self.X[idx,...], self.y[idx]
 
 
+class FullVirtualPopulation(Dataset):
+    def __init__(self, method, noise_magnitude,
+                 normalize_standardize, num_per_patient,
+                 control_combination, mdd_combination,
+                 test=False, label_smoothing=0.):
+        self.patient_groups = ['Control', 'MDD']
+        self.num_per_patient = num_per_patient
+        self.num_mdd_patients = 56 - len(mdd_combination)
+        self.num_control_patients = 52 - len(control_combination)
+        self.X = torch.zeros((0, 11, 3), dtype=float)
+        self.y = torch.zeros((0,), dtype=float)
+        self.test = test
+        self.combinations = control_combination + mdd_combination
+
+        for group in self.patient_groups:
+            if self.test:
+                _, data = load_full_vpop_combinations(
+                    group, method, normalize_standardize,
+                    num_per_patient,
+                    control_combination if group == 'Control' else mdd_combination,
+                    self.num_control_patients if group == 'Control' else self.num_mdd_patients,
+                    noise_magnitude=noise_magnitude
+                )
+            else:
+                data, _ = load_full_vpop_combinations(
+                    group, method, normalize_standardize,
+                    num_per_patient,
+                    control_combination if group == 'Control' else mdd_combination,
+                    self.num_control_patients if group == 'Control' else self.num_mdd_patients,
+                    noise_magnitude=noise_magnitude
+                )
+            self.X = torch.cat((self.X, data), 0)
+            if group == 'Control':
+                if self.test:
+                    self.y = torch.cat(
+                        (self.y, torch.zeros(len(control_combination))+label_smoothing), 0
+                    )
+                else:
+                    self.y = torch.cat(
+                        (self.y, torch.zeros(num_per_patient*self.num_control_patients)+label_smoothing), 0
+                    )
+            else:
+                if self.test:
+                    self.y = torch.cat(
+                        (self.y, torch.ones(len(mdd_combination))-label_smoothing), 0
+                    )
+                else:
+                    self.y = torch.cat(
+                        (self.y, torch.ones(num_per_patient*self.num_mdd_patients)-label_smoothing), 0
+                    )
+
+    def __len__(self):
+        if self.test:
+            return len(self.combinations)
+        else:
+            return (self.num_control_patients + self.num_mdd_patients)*self.num_per_patient
+
+    def __getitem__(self, idx):
+        return self.X[idx,...], self.y[idx]
+
+
 def load_vpop(patient_group, method, normalize_standardize, num_per_patient,
               num_patients, pop_number):
     vpop_and_train = torch.load(f'Virtual Populations/{patient_group}_{method}'
@@ -348,14 +409,14 @@ def load_vpop(patient_group, method, normalize_standardize, num_per_patient,
 
 
 def load_vpop_combinations(patient_group, method, normalize_standardize, num_per_patient,
-              combination, fixed_perms):
+              combination, fixed_perms, noise_magnitude=None):
     if fixed_perms:
         vpop_and_train = torch.load(f'Virtual Populations/{patient_group}'
-                                    f'_{method}'
+                                    f'_{method}{noise_magnitude if noise_magnitude else ""}'
                                     f'_{normalize_standardize}_{num_per_patient}_'
                                     f'testPatients{combination}_fixedperms.txt')
     else:
-        vpop_and_train = torch.load(f'Virtual Populations/{patient_group}_{method}'
+        vpop_and_train = torch.load(f'Virtual Populations/{patient_group}_{method}{noise_magnitude if noise_magnitude else ""}'
                                     f'_{normalize_standardize}_{num_per_patient}_'
                                     f'testPatients{combination}.txt')
     if patient_group in ['Atypical', 'Neither']:
@@ -365,6 +426,17 @@ def load_vpop_combinations(patient_group, method, normalize_standardize, num_per
         vpop = vpop_and_train[:1000,...]
         test = vpop_and_train[1000:,...]
 
+    return vpop, test
+
+
+def load_full_vpop_combinations(patient_group, method, normalize_standardize, num_per_patient,
+              combination, num_patients, noise_magnitude=None):
+    vpop_and_train = torch.load(f'Virtual Populations/{patient_group}'
+                                f'_{method}{noise_magnitude if noise_magnitude else ""}'
+                                f'_{normalize_standardize}_{num_per_patient}_'
+                                f'testPatients{combination}_fixedperms.txt')
+    vpop = vpop_and_train[:num_patients*num_per_patient,...]
+    test = vpop_and_train[num_patients*num_per_patient:,...]
     return vpop, test
 
 
@@ -435,10 +507,10 @@ def normalize_data(series_tensor, hor):
 
 
 def standardize_data(series_tensor, hor):
-    ACTHmean = torch.tensor(23.4075, dtype=float)
-    CORTmean = torch.tensor(8.9579, dtype=float)
-    ACTHstd = torch.tensor(4.8961, dtype=float)
-    CORTstd = torch.tensor(14.9792, dtype=float)
+    ACTHmean = torch.tensor(23.6205, dtype=float)
+    CORTmean = torch.tensor(9.2878, dtype=float)
+    ACTHstd = torch.tensor(4.8611, dtype=float)
+    CORTstd = torch.tensor(15.2958, dtype=float)
     if hor == 'ACTH':
         for series in series_tensor:
             series -= ACTHmean
@@ -488,8 +560,12 @@ if __name__ == '__main__':
     # loader = DataLoader(dataset, batch_size=100, shuffle=True)
     # for batch in loader:
     #     print(batch)
-    compute_data_summary_stats()
+    # compute_data_summary_stats()
+    test = FullVirtualPopulation('Uniform', 0.05, 'StandardizeAll', 100, (47,35,5,44,28), (36,35,8,50,23))
 
+    loader = DataLoader(test)
+    for batch in loader:
+        print(f'{batch=}')
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#

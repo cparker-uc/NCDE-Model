@@ -1,7 +1,7 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Mon Jun 19, 2023 | 06:04P EDT
+# Last Modified: Thu Jul 06, 2023 | 02:42P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
@@ -11,10 +11,12 @@ NUM_PER_PATIENT = 100
 NUM_PATIENTS = 10
 NUM_POPS = 5
 METHOD = 'Uniform'
+NOISE_MAGNITUDE = 0.05
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
 
 import torch
-from torch.utils.data import DataLoader
+import numpy as np
+from torch.utils.data import DataLoader, ConcatDataset
 from get_nelson_data import NelsonData, AblesonData
 from itertools import combinations
 
@@ -27,7 +29,7 @@ def uniform_noise(input_tensor, noise_magnitude):
         output_tensor[idx] = torch.rand((1,))*noise_range + lower_bound
     return output_tensor
 
-def generate_augmented_dataset(input_data, number, method, noise_magnitude=0.1):
+def generate_augmented_dataset(input_data, number, method, noise_magnitude=NOISE_MAGNITUDE):
     vpop = torch.zeros((number, 11, 3), dtype=float)
     match method:
         case 'Uniform':
@@ -61,10 +63,34 @@ def generate_virtual_population(patient_group, num_per_patient, test_pop_nums,
 
     return torch.cat((vpop, test_pop), 0)
 
+def generate_full_virtual_population(patient_group, num_per_patient, test_pop_nums,
+                                method, shuffle=True):
+    if patient_group == 'MDD':
+        nelson_dataset = NelsonData(patient_groups=['Atypical', 'Melancholic', 'Neither'], normalize_standardize=NORMALIZE_STANDARDIZE)
+    else:
+        nelson_dataset = NelsonData(patient_groups=[patient_group], normalize_standardize=NORMALIZE_STANDARDIZE)
+    ableson_dataset = AblesonData(patient_groups=[patient_group], normalize_standardize=NORMALIZE_STANDARDIZE)
+    loader = DataLoader(ConcatDataset((nelson_dataset, ableson_dataset)), batch_size=1, shuffle=shuffle)
+    vpop = torch.zeros((0, 11, 3), dtype=float)
+    test_pop = torch.zeros((0, 11, 3))
+    for idx, batch in enumerate(loader):
+        batch = batch[0]
+        if idx in test_pop_nums:
+            test_pop = torch.cat((test_pop, batch), 0)
+            continue
+        vpop = torch.cat(
+            (
+                vpop,
+                generate_augmented_dataset(batch, num_per_patient, method)
+            ), 0
+        )
+
+    return torch.cat((vpop, test_pop), 0)
+
 def generate_multiple_populations(num_pops):
     for i in range(num_pops):
         vpop_and_test = generate_virtual_population(PATIENT_GROUP, NUM_PER_PATIENT, NUM_PATIENTS, METHOD)
-        torch.save(vpop_and_test, f'Virtual Populations/{PATIENT_GROUP}_{METHOD}_{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_{NUM_PATIENTS}_{i+1}.txt')
+        torch.save(vpop_and_test, f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_{NUM_PATIENTS}_{i+1}.txt')
 
 def generate_all_pop_combinations():
     for combination in combinations(
@@ -77,7 +103,7 @@ def generate_all_pop_combinations():
         )
         torch.save(
             vpop_and_test,
-            f'Virtual Populations/{PATIENT_GROUP}_{METHOD}_'
+            f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
             f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
             f'testPatients{combination}.txt'
         )
@@ -93,9 +119,9 @@ def generate_3combinations():
     )
     torch.save(
         vpop_and_test1,
-        f'Virtual Populations/{PATIENT_GROUP}-1of3_{METHOD}_'
+        f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
         f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
-        f'testPatients{tuple(random_combo1.tolist())}.txt'
+        f'testPatients{tuple(random_combo1.tolist())}_fixedperms.txt'
     )
 
     random_combo2 = random_permutation[perm_len:(2*perm_len)]
@@ -104,9 +130,9 @@ def generate_3combinations():
     )
     torch.save(
         vpop_and_test2,
-        f'Virtual Populations/{PATIENT_GROUP}-2of3_{METHOD}_'
+        f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
         f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
-        f'testPatients{tuple(random_combo2.tolist())}.txt'
+        f'testPatients{tuple(random_combo2.tolist())}_fixedperms.txt'
     )
 
     random_combo3 = random_permutation[(2*perm_len):]
@@ -115,10 +141,32 @@ def generate_3combinations():
     )
     torch.save(
         vpop_and_test3,
-        f'Virtual Populations/{PATIENT_GROUP}-3of3_{METHOD}_'
+        f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
         f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
-        f'testPatients{tuple(random_combo3.tolist())}.txt'
+        f'testPatients{tuple(random_combo3.tolist())}_fixedperms.txt'
     )
+
+
+def generate_full_combinations(test_len):
+    random_permutation = torch.randperm(52 if PATIENT_GROUP == 'Control' else 56)
+
+    # Loop through the necessary number of permutations to cover all patients
+    #  with the given number of test patients per population
+    n_pops = np.ceil(len(random_permutation)/test_len)
+    for i in range(int(n_pops)):
+        try:
+            random_combo = random_permutation[i*test_len:(i+1)*test_len]
+        except IndexError:
+            random_combo = random_permutation[i*test_len:]
+        vpop_and_test = generate_full_virtual_population(
+            PATIENT_GROUP, NUM_PER_PATIENT, random_combo, METHOD, shuffle=False
+        )
+        torch.save(
+            vpop_and_test,
+            f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
+            f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
+            f'testPatients{tuple(random_combo.tolist())}_fixedperms.txt'
+        )
 
 
 if __name__ == '__main__':
@@ -132,10 +180,11 @@ if __name__ == '__main__':
     # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
     #     generate_all_pop_combinations()
 
-    for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
-        generate_3combinations()
+    # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
+    #     generate_3combinations()
 
-    pass
+    for PATIENT_GROUP in ['MDD', 'Control']:
+        generate_full_combinations(5)
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #
