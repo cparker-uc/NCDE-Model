@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Thu Jul 06, 2023 | 04:36P EDT
+# Last Modified: Thu Jul 06, 2023 | 04:59P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -14,7 +14,7 @@ HDIM = 32
 OUTPUT_CHANNELS = 1
 
 # Training hyperparameters
-ITERS = 200
+ITERS = 300
 LR = 1e-3
 DECAY = 1e-6
 OPT_RESET = None
