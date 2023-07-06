@@ -1,12 +1,12 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Thu Jun 22, 2023 | 12:05P EDT
+# Last Modified: Thu Jul 06, 2023 | 01:56P EDT
 
 import os
 import torch
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 
 class NelsonData(Dataset):
     def __init__(self, data_dir='Nelson TSST Individual Patient Data',
@@ -116,6 +116,106 @@ class NelsonData(Dataset):
                     self.X[...,0].reshape(length,11,1),
                     standardize_nelson_data(self.X[...,1], 'ACTH').reshape(length,11,1),
                     standardize_nelson_data(self.X[...,2], 'CORT').reshape(length,11,1)
+                ), 2
+            )
+        elif self.normalize_standardize == 'NormalizeAll':
+            self.X = torch.cat(
+                (
+                    self.X[...,0].reshape(length,11,1),
+                    normalize_data(self.X[...,1], 'ACTH').reshape(length,11,1),
+                    normalize_data(self.X[...,2], 'CORT').reshape(length,11,1)
+                ), 2
+            )
+        elif self.normalize_standardize == 'StandardizeAll':
+            self.X = torch.cat(
+                (
+                    self.X[...,0].reshape(length,11,1),
+                    standardize_data(self.X[...,1], 'ACTH').reshape(length,11,1),
+                    standardize_data(self.X[...,2], 'CORT').reshape(length,11,1)
+                ), 2
+            )
+
+
+    def __len__(self):
+        length = 0
+        for group in self.patient_groups:
+            if group in ['Control', 'Melancholic']:
+                length += 15
+            else:
+                length += 14
+
+        return length
+
+    def __getitem__(self, idx):
+        return self.X[idx,...], self.y[idx]
+
+
+class AblesonData(Dataset):
+    def __init__(self, data_dir='Ableson TSST Individual Patient Data (Without First 30 Min)',
+                 patient_groups=['MDD', 'Control'],
+                 normalize_standardize=None):
+        super().__init__()
+        self.data_dir = data_dir
+        self.patient_groups = patient_groups
+        self.normalize_standardize = normalize_standardize
+
+        length = self.__len__()
+
+        # x contains 11 time points with 3 input channels (time, acth, cort)
+        #  for each time, with 58 total patients
+        self.X = torch.zeros((0, 11, 3))
+        # self.X_standard = torch.zeros((length, 11, 3))
+        # self.X_normal = torch.zeros((length, 11, 3))
+
+        # self.y indicates whether the patient data is MDD
+        self.y = torch.zeros((0,))
+
+        for group in self.patient_groups:
+            if group == 'Control':
+                X_tmp = torch.zeros((37, 11, 3))
+                y_tmp = torch.zeros((37,))
+                for idx in range(37):
+                    data_path = os.path.join(
+                        self.data_dir, f'{group}Patient{idx+1}.txt'
+                    )
+                    data = np.genfromtxt(data_path)
+                    X_tmp[idx,...] = torch.from_numpy(data)
+                # We normalize the time steps, so that they are between 0
+                #  and 1. Not sure this will have any impact, but it will
+                #  make things somewhat cleaner
+                X_tmp[...,0] = normalize_time_series(X_tmp[...,0])
+                self.X = torch.cat((self.X, X_tmp), 0)
+                self.y = torch.cat((self.y, y_tmp), 0)
+            else:
+                X_tmp = torch.zeros((13, 11, 3))
+                y_tmp = torch.ones((13,))
+                for idx in range(13):
+                    data_path = os.path.join(
+                        self.data_dir, f'{group}Patient{idx+1}.txt'
+                    )
+                    data = np.genfromtxt(data_path)
+                    X_tmp[idx,...] = torch.from_numpy(data)
+                # We normalize the time steps, so that they are between 0
+                #  and 1. Not sure this will have any impact, but it will
+                #  make things somewhat cleaner
+                X_tmp[...,0] = normalize_time_series(X_tmp[...,0])
+                self.X = torch.cat((self.X, X_tmp), 0)
+                self.y = torch.cat((self.y, y_tmp), 0)
+
+        if self.normalize_standardize == 'NormalizeAll':
+            self.X = torch.cat(
+                (
+                    self.X[...,0].reshape(length,11,1),
+                    normalize_data(self.X[...,1], 'ACTH').reshape(length,11,1),
+                    normalize_data(self.X[...,2], 'CORT').reshape(length,11,1)
+                ), 2
+            )
+        elif self.normalize_standardize == 'StandardizeAll':
+            self.X = torch.cat(
+                (
+                    self.X[...,0].reshape(length,11,1),
+                    standardize_data(self.X[...,1], 'ACTH').reshape(length,11,1),
+                    standardize_data(self.X[...,2], 'CORT').reshape(length,11,1)
                 ), 2
             )
 
@@ -318,37 +418,77 @@ def standardize_nelson_data(series_tensor, hor):
     return series_tensor
 
 
-def compute_nelson_data_summary_stats():
-    dataset = NelsonData(patient_groups=['Control', 'Atypical'])
+def normalize_data(series_tensor, hor):
+    ACTHmin = torch.tensor(5.6, dtype=float)
+    CORTmin = torch.tensor(1.2, dtype=float)
+    ACTHrange = torch.tensor(160.5, dtype=float)
+    CORTrange = torch.tensor(44.8, dtype=float)
+    if hor == 'ACTH':
+        for series in series_tensor:
+            series -= ACTHmin
+            series /= ACTHrange
+    elif hor == 'CORT':
+        for series in series_tensor:
+            series -= CORTmin
+            series /= CORTrange
+    return series_tensor
+
+
+def standardize_data(series_tensor, hor):
+    ACTHmean = torch.tensor(23.4075, dtype=float)
+    CORTmean = torch.tensor(8.9579, dtype=float)
+    ACTHstd = torch.tensor(4.8961, dtype=float)
+    CORTstd = torch.tensor(14.9792, dtype=float)
+    if hor == 'ACTH':
+        for series in series_tensor:
+            series -= ACTHmean
+            series /= ACTHstd
+    elif hor == 'CORT':
+        for series in series_tensor:
+            series -= CORTmean
+            series /= CORTstd
+    return series_tensor
+
+
+def compute_data_summary_stats():
+    nelson_dataset = NelsonData(patient_groups=['Control', 'Melancholic', 'Neither', 'Atypical'])
+    ableson_dataset = AblesonData()
+    dataset = ConcatDataset((nelson_dataset, ableson_dataset))
     loader = DataLoader(dataset, batch_size=1)
-    sum = torch.tensor(0, dtype=float)
-    mean = torch.tensor(0, dtype=float)
-    minimum = torch.tensor(110, dtype=float)
-    maximum = torch.tensor(0, dtype=float)
-    range_ = torch.tensor(0, dtype=float)
-    full = torch.zeros((0,))
+    sum = torch.tensor((0,0), dtype=float)
+    mean = torch.tensor((0,0), dtype=float)
+    minimum = torch.tensor((110,110), dtype=float)
+    maximum = torch.tensor((0,0), dtype=float)
+    range_ = torch.tensor((0,0), dtype=float)
+    full_acth = torch.zeros((0,))
+    full_cort = torch.zeros((0,))
     for batch in loader:
-        batch = batch[0]
-        sum += torch.sum(batch[...,1])
-        min_tmp = torch.min(batch[...,1])
-        minimum = torch.min(minimum, min_tmp)
-        max_tmp = torch.max(batch[...,1])
-        maximum = torch.max(maximum, max_tmp)
-        full = torch.cat((full, batch[...,1].reshape(-1)), 0)
-    print(torch.std(full))
+        for i in range(2):
+            batch = batch[0]
+            sum[i] += torch.sum(batch[...,i+1])
+            min_tmp = torch.min(batch[...,i+1])
+            minimum[i] = torch.min(minimum[i], min_tmp)
+            max_tmp = torch.max(batch[...,i+1])
+            maximum[i] = torch.max(maximum[i], max_tmp)
+            if i == 1:
+                full_acth = torch.cat((full_acth, batch[...,i+1].reshape(-1)), 0)
+            else:
+                full_cort = torch.cat((full_cort, batch[...,i+1].reshape(-1)), 0)
+    print(f'{torch.std(full_acth)=}')
+    print(f'{torch.std(full_cort)=}')
     mean = sum/(len(dataset)*11)
     range_ = maximum - minimum
-    print(mean, minimum, maximum, range_)
-
+    print(f'{mean=}, {minimum=}, {maximum=}, {range_=}')
 
 
 if __name__ == '__main__':
     # For debugging purposes
     # dataset = NelsonData(patient_groups=['Control', 'Atypical'], normalize_standardize='Normalize')
-    dataset = VirtualPopulation(['Control', 'Atypical'], 'Uniform', 'Standardize', 100, 10, 1)
-    loader = DataLoader(dataset, batch_size=100, shuffle=True)
-    for batch in loader:
-        print(batch)
+    # dataset = VirtualPopulation(['Control', 'Atypical'], 'Uniform', 'Standardize', 100, 10, 1)
+    # loader = DataLoader(dataset, batch_size=100, shuffle=True)
+    # for batch in loader:
+    #     print(batch)
+    compute_data_summary_stats()
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #

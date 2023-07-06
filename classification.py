@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Thu Jun 22, 2023 | 12:15P EDT
+# Last Modified: Thu Jun 22, 2023 | 12:33P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -40,7 +40,7 @@ import torch.nn as nn
 import torch.optim as optim
 import pandas as pd
 
-from itertools import combinations, combinations_with_replacement
+from itertools import combinations
 from copy import copy
 from torch.utils.data import DataLoader
 from torch.nn.functional import binary_cross_entropy_with_logits

@@ -11,11 +11,11 @@ NUM_PER_PATIENT = 100
 NUM_PATIENTS = 10
 NUM_POPS = 5
 METHOD = 'Uniform'
-NORMALIZE_STANDARDIZE = 'Standardize'
+NORMALIZE_STANDARDIZE = 'StandardizeAll'
 
 import torch
 from torch.utils.data import DataLoader
-from get_nelson_data import NelsonData
+from get_nelson_data import NelsonData, AblesonData
 from itertools import combinations
 
 def uniform_noise(input_tensor, noise_magnitude):
