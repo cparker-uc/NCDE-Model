@@ -1,7 +1,7 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Thu Jul 06, 2023 | 02:42P EDT
+# Last Modified: Thu Jul 06, 2023 | 04:11P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
@@ -11,7 +11,7 @@ NUM_PER_PATIENT = 100
 NUM_PATIENTS = 10
 NUM_POPS = 5
 METHOD = 'Uniform'
-NOISE_MAGNITUDE = 0.05
+NOISE_MAGNITUDE = 0.1
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
 
 import torch
