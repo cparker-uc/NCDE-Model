@@ -1,7 +1,7 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Thu Jul 06, 2023 | 04:11P EDT
+# Last Modified: Sat Jul 08, 2023 | 01:28P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
@@ -183,8 +183,11 @@ if __name__ == '__main__':
     # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
     #     generate_3combinations()
 
-    for PATIENT_GROUP in ['MDD', 'Control']:
-        generate_full_combinations(5)
+    # for PATIENT_GROUP in ['MDD', 'Control']:
+    #     generate_full_combinations(5)
+
+    testpop = generate_full_virtual_population('MDD', 1, (0,), 'Uniform', shuffle=False)
+    print(testpop[:42,:,0])
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #

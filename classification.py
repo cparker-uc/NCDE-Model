@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Thu Jul 06, 2023 | 04:59P EDT
+# Last Modified: Mon Jul 10, 2023 | 08:41P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -51,6 +51,8 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 from typing import Tuple
 from get_nelson_data import NelsonData, VirtualPopulation, FullVirtualPopulation
 
+# Define the device with which to train networks
+DEVICE = torch.device('cpu')
 
 # Not certain if this is necessary, but in the quickstart docs they have
 #  done a wildcard import of torchdyn base library, and this is all that does
@@ -160,7 +162,6 @@ class NDEOutputLayer(nn.Module):
 
 
 def main(virtual=True, use_combinations=False):
-    device = torch.device('cpu')
 
     # Ensure that these variables are not unbound, so that we can reference them
     #  when writing the setup file
@@ -330,8 +331,6 @@ def main(virtual=True, use_combinations=False):
 
 
 def main_given_perms(permutations):
-    device = torch.device('cpu')
-
     # Ensure that these variables are not unbound, so that we can reference them
     #  when writing the setup file
     for combo in [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]:
@@ -472,13 +471,11 @@ def main_given_perms(permutations):
                     )
 
 
-def main_full_pop(permutations):
-    device = torch.device('cpu')
-
+def main_full_vpop(permutations):
     # Ensure that these variables are not unbound, so that we can reference them
     #  when writing the setup file
-    ctrl_range = [i for i in range(5)]
-    mdd_range = [i for i in range(5)]
+    ctrl_range = [i for i in range(1,2)]
+    mdd_range = [i for i in range(12)]
     for ctrl_num in ctrl_range:
         for mdd_num in mdd_range:
             control_combination = tuple(permutations[0][ctrl_num*5:(ctrl_num+1)*5])
@@ -500,7 +497,7 @@ def main_full_pop(permutations):
             )
             model = NeuralCDE(
                 INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
-            ).double()
+            ).double().to(DEVICE)
 
             optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=DECAY)
 
@@ -511,6 +508,7 @@ def main_full_pop(permutations):
             print(f'Starting Training with Test Groups: Control {control_combination}, MDD {mdd_combination}')
             for itr in range(1, ITERS+1):
                 for j, (data, labels) in enumerate(dataloader):
+                    data = data.to(DEVICE)
                     coeffs = torchcde.\
                         hermite_cubic_coefficients_with_backward_differences(
                             data
@@ -553,7 +551,7 @@ def main_full_pop(permutations):
                     torch.save(
                         model.state_dict(),
                         f'Network States (Full VPOP Training)/NN_state_{HDIM}nodes_NCDE_'
-                        f"{METHOD}{NOISE_MAGNITUDE}"
+                        f"{METHOD}{NOISE_MAGNITUDE}Virtual_"
                         f'Control{control_combination}_MDD{mdd_combination}_'
                         f'{NUM_PER_PATIENT}perPatient_'
                         f'batchsize{BATCH_SIZE}_'
@@ -618,7 +616,6 @@ def test(method, patient_groups, num_per_patient, batch_size,
          output_channels, max_itr, control_combination=None,
          mdd_combination=None, pop_number=None, label_smoothing=0,
          fixed_perms=False, state_dir='Network States (VPOP Training)'):
-    device = torch.device('cpu')
     patient_group = patient_groups[1]
     if fixed_perms:
         dataset = VirtualPopulation(
@@ -703,7 +700,7 @@ def test(method, patient_groups, num_per_patient, batch_size,
                              f'{itr*100}ITER_{normalize_standardize}_'
                              f'smoothing{label_smoothing}_'
                              f'dropout{DROPOUT}.txt'),
-                map_location=device
+                map_location=DEVICE
             )
         except FileNotFoundError as e:
             print(f'Caught error: {e}')
@@ -762,6 +759,128 @@ def test(method, patient_groups, num_per_patient, batch_size,
             f'Classification Results/Augmented Data/NCDE_{method}Virtual'
             f'{patient_group}{pop_number if not mdd_combination else mdd_combination}'
             f"vsControl{'' if not control_combination else control_combination}"
+            f'_classification_{num_per_patient}perPatient_batchsize{batch_size}_'
+            f'{normalize_standardize}_smoothing{label_smoothing}.xlsx'
+        ) as writer:
+            performance_df.to_excel(writer)
+
+
+def test_full_vpop(method, noise_magnitude, num_per_patient, batch_size,
+         normalize_standardize, input_channels, hdim,
+         output_channels, max_itr, control_combination,
+         mdd_combination, label_smoothing=0,
+         state_dir='Network States (Full VPOP Training)'):
+    dataset = FullVirtualPopulation(
+        method=method,
+        noise_magnitude=noise_magnitude,
+        normalize_standardize=normalize_standardize,
+        num_per_patient=num_per_patient,
+        control_combination=control_combination,
+        mdd_combination=mdd_combination,
+        test=True,
+        label_smoothing=label_smoothing
+    )
+    loader = DataLoader(dataset, batch_size=len(dataset))
+
+    # DataFrame to track performance (with a row for each network state at
+    #  multiples of 100 iterations)
+    performance_df = pd.DataFrame(
+        columns=(
+            'Iterations',
+            'Success',
+            'Prediction',
+            'Error',
+            'Cross Entropy Loss',
+            'Success %'
+        )
+    )
+
+    for itr in range(1,max_itr+1):
+        index = control_combination+mdd_combination
+        tmp_index = []
+        for i, entry in enumerate(index):
+            if i < 5:
+                t = 'Control ' + str(entry)
+            else:
+                t = 'MDD ' + str(entry)
+            tmp_index.append(t)
+        index = tuple(tmp_index)
+        # Pandas Series to allow us to insert the number of iterations for each
+        #  group of predicitons only in the first row of the group
+        iterations = pd.Series((itr*100,), index=(index[0],))
+
+        model = NeuralCDE(
+            input_channels, hdim, output_channels
+        ).double()
+        try:
+            state_dict = torch.load(
+                os.path.join(state_dir, f'NN_state_{hdim}nodes_NCDE_'
+                             f'{method}{noise_magnitude}'
+                             f"{('Control' + str(control_combination) + '_MDD' + str(mdd_combination))}_"
+                             f'{num_per_patient}perPatient_'
+                             f'batchsize{batch_size}_'
+                             f'{itr*100}ITER_{normalize_standardize}_'
+                             f'smoothing{label_smoothing}_'
+                             f'dropout{DROPOUT}.txt'),
+                map_location=DEVICE
+            )
+        except FileNotFoundError as e:
+            print(f'Caught error: {e}')
+            break
+
+        model.load_state_dict(state_dict)
+
+        for batch in loader:
+            (data, label) = batch
+            coeffs = torchcde.\
+                hermite_cubic_coefficients_with_backward_differences(
+                    data
+                )
+
+            pred_y = model(coeffs).squeeze(-1)
+            pred_y = torch.sigmoid(pred_y)
+
+            loss = binary_cross_entropy_with_logits(pred_y, label)
+            error = torch.abs(label - pred_y)
+
+            # Rounding the predicted y to see if it was successful
+            rounded_y = torch.round(pred_y)
+            success = [not y for y in torch.abs(label - rounded_y)]
+
+            # Create Pandas Series objects so that we can insert these only
+            #  in the last row of each iteration prediction group
+            cross_entropy_loss = pd.Series(
+                (loss.item(),),
+                index=(index[-1],)
+            )
+            success_pct = pd.Series(
+                (sum(success)/len(pred_y),),
+                index=(index[-1],)
+            )
+            tmp_df = pd.DataFrame(
+                data={
+                    'Iterations': iterations,
+                    'Success': success,
+                    'Prediction': pred_y,
+                    'Error': error,
+                    'Cross Entropy Loss': cross_entropy_loss,
+                    'Success %': success_pct
+                }, index=index
+            )
+
+            # Add the performance metrics to the DataFrame as a new row
+            performance_df = pd.concat(
+                (
+                    performance_df,
+                    tmp_df
+                ),
+            )
+
+    else:
+        with pd.ExcelWriter(
+            f'Classification Results/Augmented Data/NCDE_{method}{noise_magnitude}'
+            f'MDD{mdd_combination}'
+            f"vsControl{control_combination}"
             f'_classification_{num_per_patient}perPatient_batchsize{batch_size}_'
             f'{normalize_standardize}_smoothing{label_smoothing}.xlsx'
         ) as writer:
@@ -853,7 +972,7 @@ if __name__ == "__main__":
          50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
          2]
     ]
-    main_full_pop(permutations)
+    main_full_vpop(permutations)
 
     # TESTING WITH COMBINATIONS OF TEST PATIENTS
     # with torch.no_grad():
@@ -891,6 +1010,38 @@ if __name__ == "__main__":
     #     perms=permutations
     # )
 
+    # TESTING WITH FIXED COMBINATIONS ON POPULATION OF BOTH NELSON AND ABLESON
+    # permutations = [
+    #     # Control
+    #     [30, 11, 3, 38, 29, 35, 1, 31, 14, 19, 39, 17, 23, 27, 8, 16, 22, 47,
+    #      15, 7, 26, 33, 36, 49, 2, 37, 4, 45, 48, 20, 12, 18, 34, 42, 21, 46,
+    #      28, 13, 50, 51, 25, 44, 40, 41, 43, 0, 6, 9, 24, 32, 10, 5],
+    #     # MDD
+    #     [41, 8, 15, 16, 33, 43, 3, 19, 7, 1, 11, 12, 53, 29, 55, 37, 24, 6, 54,
+    #      21, 27, 47, 13, 25, 5, 0, 30, 46, 17, 23, 36, 10, 39, 14, 18, 35, 22,
+    #      50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
+    #      2]
+    # ]
+    # with torch.no_grad():
+    #     ctrl_range = [i for i in range(3)]
+    #     mdd_range = [i for i in range(5)]
+    #     for ctrl_num in ctrl_range:
+    #         for mdd_num in mdd_range:
+    #             ctrl_combo = tuple(permutations[0][ctrl_num*5:(ctrl_num+1)*5])
+    #             mdd_combo = tuple(permutations[1][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(permutations[1]) else len(permutations[1])])
+    #             test_full_vpop(
+    #                 method='Uniform',
+    #                 noise_magnitude=0.1,
+    #                 num_per_patient=100,
+    #                 batch_size=200,
+    #                 normalize_standardize='StandardizeAll',
+    #                 input_channels=3,
+    #                 hdim=32,
+    #                 output_channels=1,
+    #                 max_itr=3,
+    #                 control_combination=ctrl_combo,
+    #                 mdd_combination=mdd_combo,
+    #             )
     # TEST WITH RANDOM TEST CASES
     # for POP_NUMBER in range(1,3):
     #     for PATIENT_GROUPS in [['Control', 'Atypical'], ['Control', 'Melancholic'],
