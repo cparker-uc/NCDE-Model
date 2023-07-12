@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Mon Jul 10, 2023 | 08:41P EDT
+# Last Modified: Wed Jul 12, 2023 | 03:17P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -14,7 +14,7 @@ HDIM = 32
 OUTPUT_CHANNELS = 1
 
 # Training hyperparameters
-ITERS = 300
+ITERS = 200
 LR = 1e-3
 DECAY = 1e-6
 OPT_RESET = None
@@ -31,7 +31,7 @@ NUM_PATIENTS = 10
 POP_NUMBER = 1
 BATCH_SIZE = 200
 LABEL_SMOOTHING = 0
-DROPOUT = 0.2
+DROPOUT = 0
 
 
 # from IPython.core.debugger import set_trace
@@ -49,7 +49,9 @@ from copy import copy
 from torch.utils.data import DataLoader
 from torch.nn.functional import binary_cross_entropy_with_logits
 from typing import Tuple
-from get_nelson_data import NelsonData, VirtualPopulation, FullVirtualPopulation
+from get_nelson_data import (NelsonData, VirtualPopulation,
+                             FullVirtualPopulation,
+                             FullVirtualPopulation_ByLab)
 
 # Define the device with which to train networks
 DEVICE = torch.device('cpu')
@@ -471,26 +473,37 @@ def main_given_perms(permutations):
                     )
 
 
-def main_full_vpop(permutations):
+def main_full_vpop(permutations, by_lab=False):
     # Ensure that these variables are not unbound, so that we can reference them
     #  when writing the setup file
-    ctrl_range = [i for i in range(1,2)]
+    ctrl_range = [i for i in range(2)]
     mdd_range = [i for i in range(12)]
     for ctrl_num in ctrl_range:
         for mdd_num in mdd_range:
             control_combination = tuple(permutations[0][ctrl_num*5:(ctrl_num+1)*5])
             mdd_combination = tuple(permutations[1][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(permutations[1]) else len(permutations[1])])
 
-            dataset = FullVirtualPopulation(
-                method=METHOD,
-                noise_magnitude=0.1,
-                normalize_standardize=NORMALIZE_STANDARDIZE,
-                num_per_patient=NUM_PER_PATIENT,
-                control_combination=control_combination,
-                mdd_combination=mdd_combination,
-                test=False,
-                label_smoothing=LABEL_SMOOTHING
-            )
+            if not by_lab:
+                dataset = FullVirtualPopulation(
+                    method=METHOD,
+                    noise_magnitude=0.1,
+                    normalize_standardize=NORMALIZE_STANDARDIZE,
+                    num_per_patient=NUM_PER_PATIENT,
+                    control_combination=control_combination,
+                    mdd_combination=mdd_combination,
+                    test=False,
+                    label_smoothing=LABEL_SMOOTHING
+                )
+            else:
+                dataset = FullVirtualPopulation_ByLab(
+                    method=METHOD,
+                    noise_magnitude=0.1,
+                    normalize_standardize=NORMALIZE_STANDARDIZE,
+                    num_per_patient=NUM_PER_PATIENT,
+                    control_combination=control_combination,
+                    mdd_combination=mdd_combination,
+                    test=False,
+                )
 
             dataloader = DataLoader(
                 dataset=dataset, batch_size=BATCH_SIZE, shuffle=True
@@ -557,7 +570,8 @@ def main_full_vpop(permutations):
                         f'batchsize{BATCH_SIZE}_'
                         f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
                         f'smoothing{LABEL_SMOOTHING}_'
-                        f'dropout{DROPOUT}.txt'
+                        f'dropout{DROPOUT}'
+                        f'{"_byLab" if by_lab else ""}.txt'
                     )
                     with open(f'Network States (Full VPOP Training)/NN_state_{HDIM}nodes_'
                               f"NCDE_{METHOD}{NOISE_MAGNITUDE}Virtual_"
@@ -567,7 +581,8 @@ def main_full_vpop(permutations):
                               f'batchsize{BATCH_SIZE}_'
                               f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
                               f'smoothing{LABEL_SMOOTHING}_'
-                              f'dropout{DROPOUT}_setup.txt',
+                              f'dropout{DROPOUT}{"_byLab" if by_lab else ""}'
+                              '_setup.txt',
                               'w+') as file:
                         file.write(
                             f'Model Setup for {METHOD} '
@@ -767,19 +782,32 @@ def test(method, patient_groups, num_per_patient, batch_size,
 
 def test_full_vpop(method, noise_magnitude, num_per_patient, batch_size,
          normalize_standardize, input_channels, hdim,
-         output_channels, max_itr, control_combination,
-         mdd_combination, label_smoothing=0,
-         state_dir='Network States (Full VPOP Training)'):
-    dataset = FullVirtualPopulation(
-        method=method,
-        noise_magnitude=noise_magnitude,
-        normalize_standardize=normalize_standardize,
-        num_per_patient=num_per_patient,
-        control_combination=control_combination,
-        mdd_combination=mdd_combination,
-        test=True,
-        label_smoothing=label_smoothing
-    )
+         output_channels, max_itr, control_combination, control_num,
+         mdd_combination, mdd_num, label_smoothing=0,
+         state_dir='Network States (Full VPOP Training)', by_lab=False):
+    ctrl_state_dir = f'Control {control_num} {control_combination}'
+    mdd_state_dir = f'MDD {mdd_num} {mdd_combination}'
+    if not by_lab:
+        dataset = FullVirtualPopulation(
+            method=method,
+            noise_magnitude=noise_magnitude,
+            normalize_standardize=normalize_standardize,
+            num_per_patient=num_per_patient,
+            control_combination=control_combination,
+            mdd_combination=mdd_combination,
+            test=True,
+            label_smoothing=label_smoothing
+        )
+    else:
+        dataset = FullVirtualPopulation_ByLab(
+            method=method,
+            noise_magnitude=noise_magnitude,
+            normalize_standardize=normalize_standardize,
+            num_per_patient=num_per_patient,
+            control_combination=control_combination,
+            mdd_combination=mdd_combination,
+            test=True,
+        )
     loader = DataLoader(dataset, batch_size=len(dataset))
 
     # DataFrame to track performance (with a row for each network state at
@@ -814,14 +842,17 @@ def test_full_vpop(method, noise_magnitude, num_per_patient, batch_size,
         ).double()
         try:
             state_dict = torch.load(
-                os.path.join(state_dir, f'NN_state_{hdim}nodes_NCDE_'
+                os.path.join(state_dir, ctrl_state_dir, mdd_state_dir,
+                             f'NN_state_{hdim}nodes_NCDE_'
                              f'{method}{noise_magnitude}'
+                             f'Virtual_'
                              f"{('Control' + str(control_combination) + '_MDD' + str(mdd_combination))}_"
                              f'{num_per_patient}perPatient_'
                              f'batchsize{batch_size}_'
                              f'{itr*100}ITER_{normalize_standardize}_'
                              f'smoothing{label_smoothing}_'
-                             f'dropout{DROPOUT}.txt'),
+                             f'dropout{DROPOUT}{"_byLab" if by_lab else ""}'
+                             '.txt'),
                 map_location=DEVICE
             )
         except FileNotFoundError as e:
@@ -877,11 +908,13 @@ def test_full_vpop(method, noise_magnitude, num_per_patient, batch_size,
             )
 
     else:
+        print(performance_df)
         with pd.ExcelWriter(
             f'Classification Results/Augmented Data/NCDE_{method}{noise_magnitude}'
-            f'MDD{mdd_combination}'
-            f"vsControl{control_combination}"
-            f'_classification_{num_per_patient}perPatient_batchsize{batch_size}_'
+            f"Control{control_combination}"
+            f'vsMDD{mdd_combination}'
+            f'_classification{"byLab" if by_lab else ""}_'
+            f'{num_per_patient}perPatient_batchsize{batch_size}_'
             f'{normalize_standardize}_smoothing{label_smoothing}.xlsx'
         ) as writer:
             performance_df.to_excel(writer)
@@ -972,7 +1005,7 @@ if __name__ == "__main__":
          50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
          2]
     ]
-    main_full_vpop(permutations)
+    main_full_vpop(permutations, by_lab=True)
 
     # TESTING WITH COMBINATIONS OF TEST PATIENTS
     # with torch.no_grad():
@@ -1023,8 +1056,8 @@ if __name__ == "__main__":
     #      2]
     # ]
     # with torch.no_grad():
-    #     ctrl_range = [i for i in range(3)]
-    #     mdd_range = [i for i in range(5)]
+    #     ctrl_range = [i for i in range(11)]
+    #     mdd_range = [i for i in range(12)]
     #     for ctrl_num in ctrl_range:
     #         for mdd_num in mdd_range:
     #             ctrl_combo = tuple(permutations[0][ctrl_num*5:(ctrl_num+1)*5])
@@ -1038,9 +1071,11 @@ if __name__ == "__main__":
     #                 input_channels=3,
     #                 hdim=32,
     #                 output_channels=1,
-    #                 max_itr=3,
+    #                 max_itr=2,
     #                 control_combination=ctrl_combo,
+    #                 control_num=ctrl_num,
     #                 mdd_combination=mdd_combo,
+    #                 mdd_num=mdd_num
     #             )
     # TEST WITH RANDOM TEST CASES
     # for POP_NUMBER in range(1,3):
