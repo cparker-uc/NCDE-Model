@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Wed Jul 12, 2023 | 03:10P EDT
+# Last Modified: Thu Jul 13, 2023 | 09:39P EDT
 
 import os
 import torch
@@ -458,7 +458,7 @@ class FullVirtualPopulation_ByLab(Dataset):
                     )
                 else:
                     non_test_patients = list(range(56))
-                    for n in control_combination:
+                    for n in mdd_combination:
                         non_test_patients.remove(n)
                     lab = [l<43 for l in non_test_patients]
                     for l in lab:
@@ -645,11 +645,13 @@ if __name__ == '__main__':
     # for batch in loader:
     #     print(batch)
     # compute_data_summary_stats()
-    test = FullVirtualPopulation_ByLab('Uniform', 0.05, 'StandardizeAll', 100, (47,35,5,44,28), (36,35,8,50,23))
+    test = FullVirtualPopulation_ByLab('Uniform', 0.1, 'StandardizeAll', 100, (35,1,31,14,19), (2,))
 
     loader = DataLoader(test)
     for batch in loader:
-        print(f'{batch=}')
+        pass
+    # for batch in loader:
+    #     print(f'{batch=}')
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#

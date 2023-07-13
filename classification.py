@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Wed Jul 12, 2023 | 03:17P EDT
+# Last Modified: Thu Jul 13, 2023 | 09:47P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -563,8 +563,12 @@ def main_full_vpop(permutations, by_lab=False):
                     print(f"Runtime: {runtime:.6f} seconds")
                     torch.save(
                         model.state_dict(),
-                        f'Network States (Full VPOP Training)/NN_state_{HDIM}nodes_NCDE_'
-                        f"{METHOD}{NOISE_MAGNITUDE}Virtual_"
+                        f'Network States (Full VPOP Training)/'
+                        f'{"By Lab" if by_lab else "By Diagnosis"}/'
+                        f'Control {ctrl_num} {control_combination}/'
+                        f'MDD {mdd_num} {mdd_combination}/'
+                        f'NN_state_{HDIM}nodes_NCDE_'
+                        f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
                         f'Control{control_combination}_MDD{mdd_combination}_'
                         f'{NUM_PER_PATIENT}perPatient_'
                         f'batchsize{BATCH_SIZE}_'
@@ -573,8 +577,12 @@ def main_full_vpop(permutations, by_lab=False):
                         f'dropout{DROPOUT}'
                         f'{"_byLab" if by_lab else ""}.txt'
                     )
-                    with open(f'Network States (Full VPOP Training)/NN_state_{HDIM}nodes_'
-                              f"NCDE_{METHOD}{NOISE_MAGNITUDE}Virtual_"
+                    with open(f'Network States (Full VPOP Training)/'
+                              f'{"By Lab" if by_lab else "By Diagnosis"}/'
+                              f'Control {ctrl_num} {control_combination}/'
+                              f'MDD {mdd_num} {mdd_combination}/'
+                              f'NN_state_{HDIM}nodes_'
+                              f'NCDE_{METHOD}{NOISE_MAGNITUDE}Virtual_'
                               f'Control{control_combination}_'
                               f'MDD{mdd_combination}_'
                               f'{NUM_PER_PATIENT}perPatient_'
@@ -785,6 +793,7 @@ def test_full_vpop(method, noise_magnitude, num_per_patient, batch_size,
          output_channels, max_itr, control_combination, control_num,
          mdd_combination, mdd_num, label_smoothing=0,
          state_dir='Network States (Full VPOP Training)', by_lab=False):
+    class_state_dir = "By Lab" if by_lab else "By Diagnosis"
     ctrl_state_dir = f'Control {control_num} {control_combination}'
     mdd_state_dir = f'MDD {mdd_num} {mdd_combination}'
     if not by_lab:
@@ -842,7 +851,8 @@ def test_full_vpop(method, noise_magnitude, num_per_patient, batch_size,
         ).double()
         try:
             state_dict = torch.load(
-                os.path.join(state_dir, ctrl_state_dir, mdd_state_dir,
+                os.path.join(state_dir, class_state_dir, ctrl_state_dir,
+                             mdd_state_dir,
                              f'NN_state_{hdim}nodes_NCDE_'
                              f'{method}{noise_magnitude}'
                              f'Virtual_'
