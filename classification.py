@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Thu Jul 13, 2023 | 09:47P EDT
+# Last Modified: Mon Jul 17, 2023 | 12:37P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -22,10 +22,10 @@ ATOL = 1e-8
 RTOL = 1e-6
 
 # Training data selection parameters
-PATIENT_GROUPS = ['Control', 'Atypical']
+PATIENT_GROUPS = ['Control', 'MDD']
 METHOD = 'Uniform'
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
-NOISE_MAGNITUDE = 0.1
+NOISE_MAGNITUDE = 0.05
 NUM_PER_PATIENT = 100
 NUM_PATIENTS = 10
 POP_NUMBER = 1
@@ -476,7 +476,7 @@ def main_given_perms(permutations):
 def main_full_vpop(permutations, by_lab=False):
     # Ensure that these variables are not unbound, so that we can reference them
     #  when writing the setup file
-    ctrl_range = [i for i in range(2)]
+    ctrl_range = [i for i in range(0,5)]
     mdd_range = [i for i in range(12)]
     for ctrl_num in ctrl_range:
         for mdd_num in mdd_range:
@@ -486,7 +486,7 @@ def main_full_vpop(permutations, by_lab=False):
             if not by_lab:
                 dataset = FullVirtualPopulation(
                     method=METHOD,
-                    noise_magnitude=0.1,
+                    noise_magnitude=NOISE_MAGNITUDE,
                     normalize_standardize=NORMALIZE_STANDARDIZE,
                     num_per_patient=NUM_PER_PATIENT,
                     control_combination=control_combination,
@@ -497,7 +497,7 @@ def main_full_vpop(permutations, by_lab=False):
             else:
                 dataset = FullVirtualPopulation_ByLab(
                     method=METHOD,
-                    noise_magnitude=0.1,
+                    noise_magnitude=NOISE_MAGNITUDE,
                     normalize_standardize=NORMALIZE_STANDARDIZE,
                     num_per_patient=NUM_PER_PATIENT,
                     control_combination=control_combination,
@@ -918,9 +918,12 @@ def test_full_vpop(method, noise_magnitude, num_per_patient, batch_size,
             )
 
     else:
-        print(performance_df)
         with pd.ExcelWriter(
-            f'Classification Results/Augmented Data/NCDE_{method}{noise_magnitude}'
+            f'Classification Results/Augmented Data/Full VPOP Classification/'
+            f'{"By Lab" if by_lab else "By Diagnosis"}/'
+            f'Control {ctrl_num} {control_combination}/'
+            f'MDD {mdd_num} {mdd_combination}/'
+            f'NCDE_{method}{noise_magnitude}'
             f"Control{control_combination}"
             f'vsMDD{mdd_combination}'
             f'_classification{"byLab" if by_lab else ""}_'
@@ -1015,7 +1018,7 @@ if __name__ == "__main__":
          50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
          2]
     ]
-    main_full_vpop(permutations, by_lab=True)
+    main_full_vpop(permutations, by_lab=False)
 
     # TESTING WITH COMBINATIONS OF TEST PATIENTS
     # with torch.no_grad():
@@ -1085,7 +1088,8 @@ if __name__ == "__main__":
     #                 control_combination=ctrl_combo,
     #                 control_num=ctrl_num,
     #                 mdd_combination=mdd_combo,
-    #                 mdd_num=mdd_num
+    #                 mdd_num=mdd_num,
+    #                 by_lab=True
     #             )
     # TEST WITH RANDOM TEST CASES
     # for POP_NUMBER in range(1,3):

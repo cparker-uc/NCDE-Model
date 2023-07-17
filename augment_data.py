@@ -1,17 +1,17 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Sat Jul 08, 2023 | 01:28P EDT
+# Last Modified: Mon Jul 17, 2023 | 12:35P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
 
-PATIENT_GROUP = 'Neither'
+PATIENT_GROUP = 'Control'
 NUM_PER_PATIENT = 100
 NUM_PATIENTS = 10
 NUM_POPS = 5
 METHOD = 'Uniform'
-NOISE_MAGNITUDE = 0.1
+NOISE_MAGNITUDE = 0.05
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
 
 import torch
@@ -148,7 +148,19 @@ def generate_3combinations():
 
 
 def generate_full_combinations(test_len):
-    random_permutation = torch.randperm(52 if PATIENT_GROUP == 'Control' else 56)
+    # random_permutation = torch.randperm(52 if PATIENT_GROUP == 'Control' else 56)
+    # Using the same fixed permutation as with 0.1 noise to generate other noise
+    #  amplitudes
+    random_permutation = (
+        [30, 11, 3, 38, 29, 35, 1, 31, 14, 19, 39, 17, 23, 27, 8, 16, 22, 47,
+         15, 7, 26, 33, 36, 49, 2, 37, 4, 45, 48, 20, 12, 18, 34, 42, 21, 46,
+         28, 13, 50, 51, 25, 44, 40, 41, 43, 0, 6, 9, 24, 32, 10, 5] if PATIENT_GROUP == 'Control' else
+        [41, 8, 15, 16, 33, 43, 3, 19, 7, 1, 11, 12, 53, 29, 55, 37, 24, 6, 54,
+         21, 27, 47, 13, 25, 5, 0, 30, 46, 17, 23, 36, 10, 39, 14, 18, 35, 22,
+         50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
+         2]
+    )
+
 
     # Loop through the necessary number of permutations to cover all patients
     #  with the given number of test patients per population
@@ -165,7 +177,7 @@ def generate_full_combinations(test_len):
             vpop_and_test,
             f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
             f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
-            f'testPatients{tuple(random_combo.tolist())}_fixedperms.txt'
+            f'testPatients{tuple(random_combo)}_fixedperms.txt'
         )
 
 
@@ -183,11 +195,11 @@ if __name__ == '__main__':
     # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
     #     generate_3combinations()
 
-    # for PATIENT_GROUP in ['MDD', 'Control']:
-    #     generate_full_combinations(5)
+    for PATIENT_GROUP in ['MDD', 'Control']:
+        generate_full_combinations(5)
 
-    testpop = generate_full_virtual_population('MDD', 1, (0,), 'Uniform', shuffle=False)
-    print(testpop[:42,:,0])
+    # testpop = generate_full_virtual_population('MDD', 1, (0,), 'Uniform', shuffle=False)
+    # print(testpop[:42,:,0])
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #
