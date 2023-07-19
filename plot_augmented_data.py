@@ -1,7 +1,7 @@
 # File Name: plot_augmented_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 22, 2023 | 12:34P EDT
-# Last Modified: Tue Jul 18, 2023 | 09:19P EDT
+# Last Modified: Wed Jul 19, 2023 | 08:46P EDT
 
 """Uses Matplotlib to plot augmented datasets for examination"""
 
@@ -358,24 +358,6 @@ if __name__ == '__main__':
             plot_test_patients_by_group_fullvpop(ctrl_num, control_combination, mdd_num, mdd_combination, by_lab=True)
             plot_test_patients_full_group_comparison_indiv_lines(ctrl_num, control_combination, mdd_num, mdd_combination, by_lab=True)
             plot_test_patients_full_group_comparison_mean_lines(ctrl_num, control_combination, mdd_num, mdd_combination, by_lab=True)
-        # dataset = VirtualPopulation(
-        #     patient_groups=PATIENT_GROUPS,
-        #     method=METHOD,
-        #     normalize_standardize=NORMALIZE_STANDARDIZE,
-        #     num_per_patient=NUM_PER_PATIENT,
-        #     num_patients=NUM_PATIENTS,
-        #     control_combination=control_combination,
-        #     mdd_combination=mdd_combination,
-        #     fixed_perms=True,
-        #     test=True,
-        #     label_smoothing=LABEL_SMOOTHING
-        # )
-        # loader = DataLoader(dataset=dataset)
-
-
-
-        # for batch in loader:
-        #     data, label = batch
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #

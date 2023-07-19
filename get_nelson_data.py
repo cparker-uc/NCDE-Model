@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Mon Jul 17, 2023 | 05:58P EDT
+# Last Modified: Wed Jul 19, 2023 | 10:40P EDT
 
 import os
 import torch
@@ -238,7 +238,8 @@ class VirtualPopulation(Dataset):
     def __init__(self, patient_groups, method, normalize_standardize,
                  num_per_patient, num_patients, pop_number=None,
                  control_combination=None, mdd_combination=None,
-                 fixed_perms=False, test=False, label_smoothing=0.):
+                 fixed_perms=False, test=False, label_smoothing=0.,
+                 noise_magnitude=None):
         self.patient_groups = patient_groups
         self.num_per_patient = num_per_patient
         self.num_patients = num_patients
@@ -262,7 +263,7 @@ class VirtualPopulation(Dataset):
                         group, method, normalize_standardize,
                         num_per_patient,
                         control_combination if group == 'Control' else mdd_combination,
-                        fixed_perms=fixed_perms
+                        fixed_perms=fixed_perms, noise_magnitude=noise_magnitude
                     )
                 else:
                     print('Need a pop_number or test patient combination')
@@ -277,7 +278,8 @@ class VirtualPopulation(Dataset):
                         group, method, normalize_standardize,
                         num_per_patient,
                         control_combination if group == 'Control' else mdd_combination,
-                        fixed_perms=fixed_perms
+                        fixed_perms=fixed_perms, noise_magnitude=noise_magnitude
+
                     )
                 else:
                     print('Need a pop_number or test patient combination')
