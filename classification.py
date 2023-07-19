@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Mon Jul 17, 2023 | 12:37P EDT
+# Last Modified: Tue Jul 18, 2023 | 09:01P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -477,7 +477,7 @@ def main_full_vpop(permutations, by_lab=False):
     # Ensure that these variables are not unbound, so that we can reference them
     #  when writing the setup file
     ctrl_range = [i for i in range(0,5)]
-    mdd_range = [i for i in range(12)]
+    mdd_range = [i for i in range(10)]
     for ctrl_num in ctrl_range:
         for mdd_num in mdd_range:
             control_combination = tuple(permutations[0][ctrl_num*5:(ctrl_num+1)*5])
@@ -500,8 +500,11 @@ def main_full_vpop(permutations, by_lab=False):
                     noise_magnitude=NOISE_MAGNITUDE,
                     normalize_standardize=NORMALIZE_STANDARDIZE,
                     num_per_patient=NUM_PER_PATIENT,
-                    control_combination=control_combination,
-                    mdd_combination=mdd_combination,
+                    # Since Nelson is treated as control for the purposes of
+                    #  labeling, we use control_combination for the Nelson data
+                    #  and mdd_combination for the Ableson data
+                    nelson_combination=control_combination,
+                    ableson_combination=mdd_combination,
                     test=False,
                 )
 
@@ -565,8 +568,10 @@ def main_full_vpop(permutations, by_lab=False):
                         model.state_dict(),
                         f'Network States (Full VPOP Training)/'
                         f'{"By Lab" if by_lab else "By Diagnosis"}/'
-                        f'Control {ctrl_num} {control_combination}/'
-                        f'MDD {mdd_num} {mdd_combination}/'
+                        f'{"Control" if not by_lab else "Nelson"} '
+                        f'{ctrl_num} {control_combination}/'
+                        f'{"MDD" if not by_lab else "Ableson"} '
+                        f'{mdd_num} {mdd_combination}/'
                         f'NN_state_{HDIM}nodes_NCDE_'
                         f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
                         f'Control{control_combination}_MDD{mdd_combination}_'
@@ -579,8 +584,10 @@ def main_full_vpop(permutations, by_lab=False):
                     )
                     with open(f'Network States (Full VPOP Training)/'
                               f'{"By Lab" if by_lab else "By Diagnosis"}/'
-                              f'Control {ctrl_num} {control_combination}/'
-                              f'MDD {mdd_num} {mdd_combination}/'
+                              f'{"Control" if not by_lab else "Nelson"} '
+                              f'{ctrl_num} {control_combination}/'
+                              f'{"MDD" if not by_lab else "Ableson"} '
+                              f'{mdd_num} {mdd_combination}/'
                               f'NN_state_{HDIM}nodes_'
                               f'NCDE_{METHOD}{NOISE_MAGNITUDE}Virtual_'
                               f'Control{control_combination}_'
@@ -1007,18 +1014,33 @@ if __name__ == "__main__":
     # main_given_perms(perms)
 
     # TRAINING WITH FIXED COMBINATIONS ON POPULATION OF BOTH NELSON AND ABLESON
+    # permutations = [
+    #     # Control
+    #     [30, 11, 3, 38, 29, 35, 1, 31, 14, 19, 39, 17, 23, 27, 8, 16, 22, 47,
+    #      15, 7, 26, 33, 36, 49, 2, 37, 4, 45, 48, 20, 12, 18, 34, 42, 21, 46,
+    #      28, 13, 50, 51, 25, 44, 40, 41, 43, 0, 6, 9, 24, 32, 10, 5],
+    #     # MDD
+    #     [41, 8, 15, 16, 33, 43, 3, 19, 7, 1, 11, 12, 53, 29, 55, 37, 24, 6, 54,
+    #      21, 27, 47, 13, 25, 5, 0, 30, 46, 17, 23, 36, 10, 39, 14, 18, 35, 22,
+    #      50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
+    #      2]
+    # ]
+    # main_full_vpop(permutations, by_lab=False)
+
+    # TRAINING WITH FIXED COMBINATIONS ON POPULATION OF BOTH NELSON AND ABLESON
+    #  WITH LABELING BY LAB (NELSON=0, ABLESON=1)
     permutations = [
-        # Control
-        [30, 11, 3, 38, 29, 35, 1, 31, 14, 19, 39, 17, 23, 27, 8, 16, 22, 47,
-         15, 7, 26, 33, 36, 49, 2, 37, 4, 45, 48, 20, 12, 18, 34, 42, 21, 46,
-         28, 13, 50, 51, 25, 44, 40, 41, 43, 0, 6, 9, 24, 32, 10, 5],
-        # MDD
-        [41, 8, 15, 16, 33, 43, 3, 19, 7, 1, 11, 12, 53, 29, 55, 37, 24, 6, 54,
-         21, 27, 47, 13, 25, 5, 0, 30, 46, 17, 23, 36, 10, 39, 14, 18, 35, 22,
-         50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
-         2]
+        # Nelson
+        [22, 10, 50, 39, 48, 40, 15,  6, 37, 25, 34,  0, 26, 12, 41, 24, 30, 57,
+        49, 53, 46, 56,  4, 38,  5, 43, 19, 11, 17, 31, 29, 20, 35,  8, 52, 21,
+        13, 18, 32, 54, 47, 28, 36, 14,  1, 45,  9, 44,  3,  2, 16, 27, 42, 51,
+        33, 23, 55,  7],
+        # Ableson
+        [8, 45,  1,  2, 24,  7, 32, 40, 15, 34, 26, 13, 27, 25, 16, 18, 29, 14,
+        48, 38, 36, 30, 39, 35, 43, 20, 47,  6, 28,  3, 33, 49, 46, 37, 41,  0,
+        12, 11, 17, 44,  9, 23, 10,  4, 42, 19, 31, 22,  5, 21]
     ]
-    main_full_vpop(permutations, by_lab=False)
+    main_full_vpop(permutations, by_lab=True)
 
     # TESTING WITH COMBINATIONS OF TEST PATIENTS
     # with torch.no_grad():

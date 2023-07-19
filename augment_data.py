@@ -1,7 +1,7 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Mon Jul 17, 2023 | 12:35P EDT
+# Last Modified: Mon Jul 17, 2023 | 05:46P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
@@ -11,7 +11,7 @@ NUM_PER_PATIENT = 100
 NUM_PATIENTS = 10
 NUM_POPS = 5
 METHOD = 'Uniform'
-NOISE_MAGNITUDE = 0.05
+NOISE_MAGNITUDE = 0.1
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
 
 import torch
@@ -86,6 +86,47 @@ def generate_full_virtual_population(patient_group, num_per_patient, test_pop_nu
         )
 
     return torch.cat((vpop, test_pop), 0)
+
+
+def generate_nelson_virtual_population(num_per_patient, test_pop_nums, method):
+    nelson_dataset = NelsonData(patient_groups=['Control', 'Atypical', 'Melancholic', 'Neither'], normalize_standardize=NORMALIZE_STANDARDIZE)
+    loader = DataLoader(nelson_dataset, batch_size=1, shuffle=False)
+    vpop = torch.zeros((0, 11, 3), dtype=float)
+    test_pop = torch.zeros((0, 11, 3))
+    for idx, batch in enumerate(loader):
+        batch = batch[0]
+        if idx in test_pop_nums:
+            test_pop = torch.cat((test_pop, batch), 0)
+            continue
+        vpop = torch.cat(
+            (
+                vpop,
+                generate_augmented_dataset(batch, num_per_patient, method)
+            ), 0
+        )
+
+    return torch.cat((vpop, test_pop), 0)
+
+
+def generate_ableson_virtual_population(num_per_patient, test_pop_nums, method):
+    ableson_dataset = AblesonData(patient_groups=['Control', 'MDD'], normalize_standardize=NORMALIZE_STANDARDIZE)
+    loader = DataLoader(ableson_dataset, batch_size=1, shuffle=False)
+    vpop = torch.zeros((0, 11, 3), dtype=float)
+    test_pop = torch.zeros((0, 11, 3))
+    for idx, batch in enumerate(loader):
+        batch = batch[0]
+        if idx in test_pop_nums:
+            test_pop = torch.cat((test_pop, batch), 0)
+            continue
+        vpop = torch.cat(
+            (
+                vpop,
+                generate_augmented_dataset(batch, num_per_patient, method)
+            ), 0
+        )
+
+    return torch.cat((vpop, test_pop), 0)
+
 
 def generate_multiple_populations(num_pops):
     for i in range(num_pops):
@@ -181,6 +222,39 @@ def generate_full_combinations(test_len):
         )
 
 
+def generate_full_combinations_by_lab(lab, test_len):
+    # random_permutation = torch.randperm(58 if lab == 'Nelson' else 50)
+    # Using the same fixed permutation as with 0.1 noise to generate other noise
+    #  amplitudes
+    random_permutation = [ 8, 45,  1,  2, 24,  7, 32, 40, 15, 34, 26, 13, 27, 25, 16, 18, 29, 14,
+        48, 38, 36, 30, 39, 35, 43, 20, 47,  6, 28,  3, 33, 49, 46, 37, 41,  0,
+        12, 11, 17, 44,  9, 23, 10,  4, 42, 19, 31, 22,  5, 21]
+
+    # Loop through the necessary number of permutations to cover all patients
+    #  with the given number of test patients per population
+    n_pops = np.ceil(len(random_permutation)/test_len)
+    for i in range(int(n_pops)):
+        try:
+            random_combo = random_permutation[i*test_len:(i+1)*test_len]
+        except IndexError:
+            random_combo = random_permutation[i*test_len:]
+        if lab == 'Nelson':
+            vpop_and_test = generate_nelson_virtual_population(
+                NUM_PER_PATIENT, random_combo, METHOD
+            )
+        else:
+            vpop_and_test = generate_ableson_virtual_population(
+                NUM_PER_PATIENT, random_combo, METHOD
+            )
+        torch.save(
+            vpop_and_test,
+            f'Virtual Populations/{lab if lab=="Nelson" else "Ableson"}_{METHOD}{NOISE_MAGNITUDE}_'
+            f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
+            f'testPatients{tuple(random_combo)}_fixedperms.txt'
+        )
+    return random_permutation
+
+
 if __name__ == '__main__':
     # Generate a virtual population based on the parameters given
     # vpop_and_test = generate_virtual_population(PATIENT_GROUP, NUM_PER_PATIENT, NUM_PATIENTS, METHOD)
@@ -195,9 +269,11 @@ if __name__ == '__main__':
     # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
     #     generate_3combinations()
 
-    for PATIENT_GROUP in ['MDD', 'Control']:
-        generate_full_combinations(5)
-
+#     for PATIENT_GROUP in ['MDD', 'Control']:
+#         generate_full_combinations(5)
+    x = generate_full_combinations_by_lab('Ableson', 5)
+    # with open('nelson_combo.txt', 'w+') as f:
+    #     f.write(str(x))
     # testpop = generate_full_virtual_population('MDD', 1, (0,), 'Uniform', shuffle=False)
     # print(testpop[:42,:,0])
 

@@ -1,7 +1,7 @@
 # File Name: plot_augmented_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 22, 2023 | 12:34P EDT
-# Last Modified: Fri Jul 14, 2023 | 03:23P EDT
+# Last Modified: Tue Jul 18, 2023 | 09:19P EDT
 
 """Uses Matplotlib to plot augmented datasets for examination"""
 
@@ -31,16 +31,27 @@ from torch.utils.data import DataLoader
 #     # Neither
 #     [ 5, 12,  7, 13, 11,  9,  4,  1,  0,  2,  3, 10,  6,  8]
 # ]
+# PERMUTATIONS = [
+#     # Control
+#     [30, 11, 3, 38, 29, 35, 1, 31, 14, 19, 39, 17, 23, 27, 8, 16, 22, 47,
+#      15, 7, 26, 33, 36, 49, 2, 37, 4, 45, 48, 20, 12, 18, 34, 42, 21, 46,
+#      28, 13, 50, 51, 25, 44, 40, 41, 43, 0, 6, 9, 24, 32, 10, 5],
+#     # MDD
+#     [41, 8, 15, 16, 33, 43, 3, 19, 7, 1, 11, 12, 53, 29, 55, 37, 24, 6, 54,
+#      21, 27, 47, 13, 25, 5, 0, 30, 46, 17, 23, 36, 10, 39, 14, 18, 35, 22,
+#      50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
+#      2]
+# ]
 PERMUTATIONS = [
-    # Control
-    [30, 11, 3, 38, 29, 35, 1, 31, 14, 19, 39, 17, 23, 27, 8, 16, 22, 47,
-     15, 7, 26, 33, 36, 49, 2, 37, 4, 45, 48, 20, 12, 18, 34, 42, 21, 46,
-     28, 13, 50, 51, 25, 44, 40, 41, 43, 0, 6, 9, 24, 32, 10, 5],
-    # MDD
-    [41, 8, 15, 16, 33, 43, 3, 19, 7, 1, 11, 12, 53, 29, 55, 37, 24, 6, 54,
-     21, 27, 47, 13, 25, 5, 0, 30, 46, 17, 23, 36, 10, 39, 14, 18, 35, 22,
-     50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
-     2]
+    # Nelson
+    [22, 10, 50, 39, 48, 40, 15,  6, 37, 25, 34,  0, 26, 12, 41, 24, 30, 57,
+     49, 53, 46, 56,  4, 38,  5, 43, 19, 11, 17, 31, 29, 20, 35,  8, 52, 21,
+     13, 18, 32, 54, 47, 28, 36, 14,  1, 45,  9, 44,  3,  2, 16, 27, 42, 51,
+     33, 23, 55,  7],
+    # Ableson
+    [8, 45,  1,  2, 24,  7, 32, 40, 15, 34, 26, 13, 27, 25, 16, 18, 29, 14,
+     48, 38, 36, 30, 39, 35, 43, 20, 47,  6, 28,  3, 33, 49, 46, 37, 41,  0,
+     12, 11, 17, 44,  9, 23, 10,  4, 42, 19, 31, 22,  5, 21]
 ]
 
 
@@ -95,8 +106,8 @@ def plot_test_patients_full_group_comparison_mean_lines(ctrl_num,
             noise_magnitude=0.1,
             normalize_standardize=NORMALIZE_STANDARDIZE,
             num_per_patient=NUM_PER_PATIENT,
-            control_combination=control_combination,
-            mdd_combination=mdd_combination,
+            nelson_combination=control_combination,
+            ableson_combination=mdd_combination,
             test=True,
         )
     loader = DataLoader(dataset=dataset)
@@ -173,8 +184,8 @@ def plot_test_patients_full_group_comparison_indiv_lines(ctrl_num,
             noise_magnitude=0.1,
             normalize_standardize=NORMALIZE_STANDARDIZE,
             num_per_patient=NUM_PER_PATIENT,
-            control_combination=control_combination,
-            mdd_combination=mdd_combination,
+            nelson_combination=control_combination,
+            ableson_combination=mdd_combination,
             test=True,
         )
     loader = DataLoader(dataset=dataset)
@@ -278,8 +289,8 @@ def plot_test_patients_by_group_fullvpop(ctrl_num, control_combination,
             noise_magnitude=0.1,
             normalize_standardize=NORMALIZE_STANDARDIZE,
             num_per_patient=NUM_PER_PATIENT,
-            control_combination=control_combination,
-            mdd_combination=mdd_combination,
+            nelson_combination=control_combination,
+            ableson_combination=mdd_combination,
             test=True,
         )
     loader = DataLoader(dataset=dataset)
@@ -327,26 +338,26 @@ def plot_test_patients_by_group_fullvpop(ctrl_num, control_combination,
 
 
 if __name__ == '__main__':
-    match PATIENT_GROUPS[1]:
-        case 'Atypical':
-            per_idx = 1
-        case 'Melancholic':
-            per_idx = 2
-        case 'Neither':
-            per_idx = 3
-        case _:
-            raise ValueError('Invalid MDD Group Selected')
+    # match PATIENT_GROUPS[1]:
+    #     case 'Atypical':
+    #         per_idx = 1
+    #     case 'Melancholic':
+    #         per_idx = 2
+    #     case 'Neither':
+    #         per_idx = 3
+    #     case _:
+    #         raise ValueError('Invalid MDD Group Selected')
 
-    ctrl_range = [i for i in range(11)]
-    mdd_range = [i for i in range(12)]
+    ctrl_range = [i for i in range(12)]
+    mdd_range = [i for i in range(10)]
     for ctrl_num in ctrl_range:
         for mdd_num in mdd_range:
             control_combination = tuple(PERMUTATIONS[0][ctrl_num*5:(ctrl_num+1)*5])
             mdd_combination = tuple(PERMUTATIONS[1][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(PERMUTATIONS[1]) else len(PERMUTATIONS[1])])
 
-            plot_test_patients_by_group_fullvpop(ctrl_num, control_combination, mdd_num, mdd_combination)
-            plot_test_patients_full_group_comparison_indiv_lines(ctrl_num, control_combination, mdd_num, mdd_combination)
-            plot_test_patients_full_group_comparison_mean_lines(ctrl_num, control_combination, mdd_num, mdd_combination)
+            plot_test_patients_by_group_fullvpop(ctrl_num, control_combination, mdd_num, mdd_combination, by_lab=True)
+            plot_test_patients_full_group_comparison_indiv_lines(ctrl_num, control_combination, mdd_num, mdd_combination, by_lab=True)
+            plot_test_patients_full_group_comparison_mean_lines(ctrl_num, control_combination, mdd_num, mdd_combination, by_lab=True)
         # dataset = VirtualPopulation(
         #     patient_groups=PATIENT_GROUPS,
         #     method=METHOD,

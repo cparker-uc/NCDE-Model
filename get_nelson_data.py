@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Thu Jul 13, 2023 | 09:39P EDT
+# Last Modified: Mon Jul 17, 2023 | 05:58P EDT
 
 import os
 import torch
@@ -400,82 +400,58 @@ class FullVirtualPopulation(Dataset):
 class FullVirtualPopulation_ByLab(Dataset):
     def __init__(self, method, noise_magnitude,
                  normalize_standardize, num_per_patient,
-                 control_combination, mdd_combination,
+                 nelson_combination, ableson_combination,
                  test=False):
-        self.patient_groups = ['Control', 'MDD']
         self.num_per_patient = num_per_patient
-        self.num_mdd_patients = 56 - len(mdd_combination)
-        self.num_control_patients = 52 - len(control_combination)
+        self.num_nelson_patients = 58 - len(nelson_combination)
+        self.num_ableson_patients = 50 - len(ableson_combination)
         self.X = torch.zeros((0, 11, 3), dtype=float)
         self.y = torch.zeros((0,), dtype=float)
         self.test = test
-        self.combinations = control_combination + mdd_combination
+        self.combinations = nelson_combination + ableson_combination
 
-        for group in self.patient_groups:
+        for lab in ['Nelson', 'Ableson']:
             if self.test:
-                _, data = load_full_vpop_combinations(
-                    group, method, normalize_standardize,
+                _, data = load_full_vpop_combinations_by_lab(
+                    lab, method, normalize_standardize,
                     num_per_patient,
-                    control_combination if group == 'Control' else mdd_combination,
-                    self.num_control_patients if group == 'Control' else self.num_mdd_patients,
+                    nelson_combination if lab == 'Nelson' else ableson_combination,
+                    self.num_nelson_patients if lab == 'Nelson' else self.num_ableson_patients,
                     noise_magnitude=noise_magnitude
                 )
             else:
-                data, _ = load_full_vpop_combinations(
-                    group, method, normalize_standardize,
+                data, _ = load_full_vpop_combinations_by_lab(
+                    lab, method, normalize_standardize,
                     num_per_patient,
-                    control_combination if group == 'Control' else mdd_combination,
-                    self.num_control_patients if group == 'Control' else self.num_mdd_patients,
+                    nelson_combination if lab == 'Nelson' else ableson_combination,
+                    self.num_nelson_patients if lab == 'Nelson' else self.num_ableson_patients,
                     noise_magnitude=noise_magnitude
                 )
             self.X = torch.cat((self.X, data), 0)
-            if group == 'Control':
-                # Nelson lab = 0, Ableson lab = 1
+            if lab == 'Nelson':
                 if self.test:
-                    lab = [l<15 for l in control_combination]
                     self.y = torch.cat(
-                        (self.y, torch.tensor(lab)), 0
+                        (self.y, torch.zeros(len(nelson_combination))), 0
                     )
                 else:
-                    non_test_patients = list(range(52))
-                    for n in control_combination:
-                        non_test_patients.remove(n)
-                    lab = [l<15 for l in non_test_patients]
-                    for l in lab:
-                        if l:
-                            self.y = torch.cat(
-                                (self.y, torch.ones(num_per_patient)), 0
-                            )
-                        else:
-                            self.y = torch.cat(
-                                (self.y, torch.zeros(num_per_patient)), 0
-                            )
+                    self.y = torch.cat(
+                        (self.y, torch.zeros(num_per_patient*self.num_nelson_patients)), 0
+                    )
             else:
                 if self.test:
-                    lab = [l<43 for l in mdd_combination]
                     self.y = torch.cat(
-                        (self.y, torch.ones(len(mdd_combination))), 0
+                        (self.y, torch.ones(len(ableson_combination))), 0
                     )
                 else:
-                    non_test_patients = list(range(56))
-                    for n in mdd_combination:
-                        non_test_patients.remove(n)
-                    lab = [l<43 for l in non_test_patients]
-                    for l in lab:
-                        if l:
-                            self.y = torch.cat(
-                                (self.y, torch.ones(num_per_patient)), 0
-                            )
-                        else:
-                            self.y = torch.cat(
-                                (self.y, torch.zeros(num_per_patient)), 0
-                            )
+                    self.y = torch.cat(
+                        (self.y, torch.ones(num_per_patient*self.num_ableson_patients)), 0
+                    )
 
     def __len__(self):
         if self.test:
             return len(self.combinations)
         else:
-            return (self.num_control_patients + self.num_mdd_patients)*self.num_per_patient
+            return (self.num_nelson_patients + self.num_ableson_patients)*self.num_per_patient
 
     def __getitem__(self, idx):
         return self.X[idx,...], self.y[idx]
@@ -517,6 +493,17 @@ def load_full_vpop_combinations(patient_group, method, normalize_standardize, nu
               combination, num_patients, noise_magnitude=None):
     vpop_and_train = torch.load(f'Virtual Populations/{patient_group}'
                                 f'_{method}{noise_magnitude if noise_magnitude else ""}'
+                                f'_{normalize_standardize}_{num_per_patient}_'
+                                f'testPatients{combination}_fixedperms.txt')
+    vpop = vpop_and_train[:num_patients*num_per_patient,...]
+    test = vpop_and_train[num_patients*num_per_patient:,...]
+    return vpop, test
+
+
+def load_full_vpop_combinations_by_lab(lab, method, normalize_standardize, num_per_patient,
+              combination, num_patients, noise_magnitude):
+    vpop_and_train = torch.load(f'Virtual Populations/{lab}'
+                                f'_{method}{noise_magnitude}'
                                 f'_{normalize_standardize}_{num_per_patient}_'
                                 f'testPatients{combination}_fixedperms.txt')
     vpop = vpop_and_train[:num_patients*num_per_patient,...]
