@@ -1,14 +1,11 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Thu Jul 20, 2023 | 12:50P EDT
+# Last Modified: Thu Jul 20, 2023 | 03:33P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
 # Network architecture parameters
-from augment_data import NOISE_MAGNITUDE
-
-
 INPUT_CHANNELS = 3
 HDIM = 32
 OUTPUT_CHANNELS = 1
@@ -47,9 +44,9 @@ from copy import copy
 from torch.utils.data import DataLoader
 from torch.nn.functional import binary_cross_entropy_with_logits
 from typing import Tuple
-from get_nelson_data import (NelsonData, VirtualPopulation,
-                             FullVirtualPopulation,
-                             FullVirtualPopulation_ByLab)
+from get_data import NelsonData
+from get_augmented_data import (NelsonVirtualPopulation, FullVirtualPopulation,
+                                FullVirtualPopulation_ByLab)
 from neural_cde import NeuralCDE
 
 # Define the device with which to train networks
@@ -59,6 +56,9 @@ DEVICE = torch.device('cpu')
 #  done a wildcard import of torchdyn base library, and this is all that does
 TTuple = Tuple[torch.Tensor, torch.Tensor]
 
+
+def load_data(virtual=True, control_combination=None, mdd_combination=None):
+    pass
 
 def main(virtual=True, use_combinations=False):
 
@@ -70,7 +70,7 @@ def main(virtual=True, use_combinations=False):
         dataset = NelsonData(
             'Nelson TSST Individual Patient Data',
             patient_groups=PATIENT_GROUPS,
-            normalize_standardize='standardize'
+            normalize_standardize=NORMALIZE_STANDARDIZE
         )
     elif use_combinations:
         all_combos_control = combinations(range(15), 5)
@@ -84,7 +84,7 @@ def main(virtual=True, use_combinations=False):
         control_combination = [combo for combo in all_combos_control][random_control]
         mdd_combination = [combo for combo in all_combos_melancholic][random_melancholic] if PATIENT_GROUP == 'Melancholic' else [combo for combo in all_combos_atypical_neither][random_atypical_neither]
 
-        dataset = VirtualPopulation(
+        dataset = NelsonVirtualPopulation(
             patient_groups=PATIENT_GROUPS,
             method=METHOD,
             normalize_standardize=NORMALIZE_STANDARDIZE,
@@ -96,7 +96,7 @@ def main(virtual=True, use_combinations=False):
             label_smoothing=LABEL_SMOOTHING
         )
     else:
-        dataset = VirtualPopulation(
+        dataset = NelsonVirtualPopulation(
             patient_groups=PATIENT_GROUPS,
             method=METHOD,
             normalize_standardize=NORMALIZE_STANDARDIZE,
@@ -237,7 +237,7 @@ def main_given_perms(permutations):
         control_combination = tuple(permutations[0][combo[0]*5:(combo[0]+1)*5])
         mdd_combination = tuple(permutations[1][combo[1]*5:((combo[1]+1)*5) if (combo[1]+1)*5 < len(permutations[1]) else len(permutations[1])])
 
-        dataset = VirtualPopulation(
+        dataset = NelsonVirtualPopulation(
             patient_groups=PATIENT_GROUPS,
             method=METHOD,
             normalize_standardize=NORMALIZE_STANDARDIZE,
@@ -386,7 +386,7 @@ def main_cort_only(permutations):
             control_combination = tuple(permutations[0][ctrl_num*5:(ctrl_num+1)*5])
             mdd_combination = tuple(permutations[1][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(permutations[1]) else len(permutations[1])])
 
-            dataset = VirtualPopulation(
+            dataset = NelsonVirtualPopulation(
                 patient_groups=PATIENT_GROUPS,
                 method=METHOD,
                 normalize_standardize=NORMALIZE_STANDARDIZE,
@@ -707,7 +707,7 @@ def test(method, patient_groups, num_per_patient, batch_size,
          cort_only=False):
     patient_group = patient_groups[1]
     if cort_only:
-        dataset = VirtualPopulation(
+        dataset = NelsonVirtualPopulation(
             patient_groups=patient_groups,
             method=method,
             normalize_standardize=normalize_standardize,
@@ -721,7 +721,7 @@ def test(method, patient_groups, num_per_patient, batch_size,
             noise_magnitude=NOISE_MAGNITUDE
         )
     elif fixed_perms:
-        dataset = VirtualPopulation(
+        dataset = NelsonVirtualPopulation(
             patient_groups=patient_groups,
             method=method,
             normalize_standardize=normalize_standardize,
@@ -734,7 +734,7 @@ def test(method, patient_groups, num_per_patient, batch_size,
             label_smoothing=label_smoothing
         )
     elif control_combination and mdd_combination:
-        dataset = VirtualPopulation(
+        dataset = NelsonVirtualPopulation(
             patient_groups=patient_groups,
             method=method,
             normalize_standardize=normalize_standardize,
@@ -746,7 +746,7 @@ def test(method, patient_groups, num_per_patient, batch_size,
             label_smoothing=label_smoothing
         )
     elif pop_number:
-        dataset = VirtualPopulation(
+        dataset = NelsonVirtualPopulation(
             patient_groups=patient_groups,
             method=method,
             normalize_standardize=normalize_standardize,

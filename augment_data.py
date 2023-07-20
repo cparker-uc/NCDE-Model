@@ -1,7 +1,7 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Thu Jul 20, 2023 | 12:41P EDT
+# Last Modified: Thu Jul 20, 2023 | 03:16P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
@@ -14,11 +14,10 @@ METHOD = 'Uniform'
 NOISE_MAGNITUDE = 0.1
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
 
-from numpy._typing import _128Bit
 import torch
 import numpy as np
 from torch.utils.data import DataLoader, ConcatDataset
-from get_nelson_data import NelsonData, AblesonData
+from get_data import NelsonData, AblesonData
 from itertools import combinations
 
 def uniform_noise(input_tensor, noise_magnitude):
