@@ -14,20 +14,20 @@ class BaseVirtualPopulation(Dataset):
     """Base class to be inherited by dataset-specific classes below"""
     def __init__(self, patient_groups: list[str], method: str,
                  normalize_standardize: str, num_per_patient: int,
-                 num_patients: int, pop_number: int=0,
-                 control_combination: tuple=(), mdd_combination: tuple=(),
-                 fixed_perms: bool=False, test: bool=False,
-                 label_smoothing: float=0., noise_magnitude: float=0.):
+                 num_patients: int, control_combination: tuple=(),
+                 mdd_combination: tuple=(), fixed_perms: bool=False,
+                 test: bool=False, label_smoothing: float=0.,
+                 noise_magnitude: float=0.):
         pass
 
 class NelsonVirtualPopulation(BaseVirtualPopulation):
     def __init__(self, patient_groups, method, normalize_standardize,
-                 num_per_patient, num_patients, pop_number=None,
+                 num_per_patient, num_patients,
                  control_combination=None, mdd_combination=None,
                  fixed_perms=False, test=False, label_smoothing=0.,
                  noise_magnitude=None):
         super().__init__(patient_groups, method, normalize_standardize,
-                         num_per_patient, num_patients, pop_number,
+                         num_per_patient, num_patients,
                          control_combination, mdd_combination, fixed_perms,
                          test, label_smoothing, noise_magnitude)
         self.patient_groups = patient_groups
@@ -43,36 +43,20 @@ class NelsonVirtualPopulation(BaseVirtualPopulation):
 
         for group in self.patient_groups:
             if self.test:
-                if pop_number:
-                    _, data = load_vpop(
-                        group, method, normalize_standardize,
-                        num_per_patient, num_patients, pop_number
-                    )
-                elif control_combination and mdd_combination:
-                    _, data = load_vpop_combinations(
-                        group, method, normalize_standardize,
-                        num_per_patient,
-                        control_combination if group == 'Control' else mdd_combination,
-                        fixed_perms=fixed_perms, noise_magnitude=noise_magnitude
-                    )
-                else:
-                    print('Need a pop_number or test patient combination')
+                _, data = load_vpop_combinations(
+                    group, method, normalize_standardize,
+                    num_per_patient,
+                    control_combination if group == 'Control' else mdd_combination,
+                    fixed_perms=fixed_perms, noise_magnitude=noise_magnitude
+                )
             else:
-                if pop_number:
-                    data, _ = load_vpop(
-                        group, method, normalize_standardize,
-                        num_per_patient, num_patients, pop_number
-                    )
-                elif control_combination and mdd_combination:
-                    data, _ = load_vpop_combinations(
-                        group, method, normalize_standardize,
-                        num_per_patient,
-                        control_combination if group == 'Control' else mdd_combination,
-                        fixed_perms=fixed_perms, noise_magnitude=noise_magnitude
+                data, _ = load_vpop_combinations(
+                    group, method, normalize_standardize,
+                    num_per_patient,
+                    control_combination if group == 'Control' else mdd_combination,
+                    fixed_perms=fixed_perms, noise_magnitude=noise_magnitude
 
-                    )
-                else:
-                    print('Need a pop_number or test patient combination')
+                )
             self.X = torch.cat((self.X, data), 0)
             if group == 'Control':
                 if self.test:
