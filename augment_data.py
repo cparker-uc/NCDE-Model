@@ -1,7 +1,7 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Mon Jul 17, 2023 | 05:46P EDT
+# Last Modified: Thu Jul 20, 2023 | 12:41P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
@@ -14,6 +14,7 @@ METHOD = 'Uniform'
 NOISE_MAGNITUDE = 0.1
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
 
+from numpy._typing import _128Bit
 import torch
 import numpy as np
 from torch.utils.data import DataLoader, ConcatDataset
@@ -152,7 +153,27 @@ def generate_all_pop_combinations():
 
 def generate_3combinations():
     perm_len = 5
-    random_permutation = torch.randperm(15 if PATIENT_GROUP in ['Control', 'Melancholic'] else 14)
+    permutations = [
+        # Control
+        [13, 11,  8, 14,  6,  2, 12, 10,  5,  1,  0,  9,  3,  7,  4],
+        # Atypical
+        [ 0,  7, 12,  8, 11,  2,  6,  9,  3,  5,  4,  1, 13, 10],
+    #     # Melancholic
+        [10, 13,  4,  2,  3, 12, 14,  6,  8,  9,  5,  7,  0, 11,  1],
+    #     # Neither
+        [ 5, 12,  7, 13, 11,  9,  4,  1,  0,  2,  3, 10,  6,  8]
+    ]
+    match PATIENT_GROUP:
+        case 'Control':
+            random_permutation = permutations[0]
+        case 'Atypical':
+            random_permutation = permutations[1]
+        case 'Melancholic':
+            random_permutation = permutations[2]
+        case 'Neither':
+            random_permutation = permutations[3]
+
+    # random_permutation = torch.randperm(15 if PATIENT_GROUP in ['Control', 'Melancholic'] else 14)
 
     random_combo1 = random_permutation[:perm_len]
     vpop_and_test1 = generate_virtual_population(
@@ -162,7 +183,7 @@ def generate_3combinations():
         vpop_and_test1,
         f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
         f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
-        f'testPatients{tuple(random_combo1.tolist())}_fixedperms.txt'
+        f'testPatients{tuple(random_combo1)}_fixedperms.txt'
     )
 
     random_combo2 = random_permutation[perm_len:(2*perm_len)]
@@ -173,7 +194,7 @@ def generate_3combinations():
         vpop_and_test2,
         f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
         f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
-        f'testPatients{tuple(random_combo2.tolist())}_fixedperms.txt'
+        f'testPatients{tuple(random_combo2)}_fixedperms.txt'
     )
 
     random_combo3 = random_permutation[(2*perm_len):]
@@ -184,7 +205,7 @@ def generate_3combinations():
         vpop_and_test3,
         f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
         f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
-        f'testPatients{tuple(random_combo3.tolist())}_fixedperms.txt'
+        f'testPatients{tuple(random_combo3)}_fixedperms.txt'
     )
 
 
@@ -266,12 +287,14 @@ if __name__ == '__main__':
     # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
     #     generate_all_pop_combinations()
 
-    # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
-    #     generate_3combinations()
+    for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
+        generate_3combinations()
 
 #     for PATIENT_GROUP in ['MDD', 'Control']:
 #         generate_full_combinations(5)
-    x = generate_full_combinations_by_lab('Ableson', 5)
+
+    # x = generate_full_combinations_by_lab('Ableson', 5)
+
     # with open('nelson_combo.txt', 'w+') as f:
     #     f.write(str(x))
     # testpop = generate_full_virtual_population('MDD', 1, (0,), 'Uniform', shuffle=False)
