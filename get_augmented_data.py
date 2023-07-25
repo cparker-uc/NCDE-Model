@@ -1,293 +1,226 @@
 # File Name: get_augmented_data.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 03:19P EDT
-# Last Modified: Thu Jul 20, 2023 | 03:33P EDT
+# Last Modified: Mon Jul 24, 2023 | 01:37P EDT
 
 """Loads the datasets that have been augmented with noise to create virtual
 patients"""
 
 import torch
-from torch.utils.data import Dataset
+import numpy as np
+from torch.utils.data import Dataset, DataLoader
 
 
 class BaseVirtualPopulation(Dataset):
     """Base class to be inherited by dataset-specific classes below"""
-    def __init__(self, patient_groups: list[str], method: str,
-                 normalize_standardize: str, num_per_patient: int,
-                 num_patients: int, control_combination: tuple=(),
-                 mdd_combination: tuple=(), fixed_perms: bool=False,
+    def __init__(self, method: str, normalize_standardize: str,
+                 num_per_patient: int, control_combination: tuple=(),
+                 mdd_combination: tuple=(),
                  test: bool=False, label_smoothing: float=0.,
-                 noise_magnitude: float=0.):
-        pass
+                 noise_magnitude: float=0., pop_number: int=0):
+        # TO BE SET IN THE CHILD CLASS
+        self.group_info = {}
+        self.patient_groups = []
 
-class NelsonVirtualPopulation(BaseVirtualPopulation):
-    def __init__(self, patient_groups, method, normalize_standardize,
-                 num_per_patient, num_patients,
-                 control_combination=None, mdd_combination=None,
-                 fixed_perms=False, test=False, label_smoothing=0.,
-                 noise_magnitude=None):
-        super().__init__(patient_groups, method, normalize_standardize,
-                         num_per_patient, num_patients,
-                         control_combination, mdd_combination, fixed_perms,
-                         test, label_smoothing, noise_magnitude)
-        self.patient_groups = patient_groups
+        # PARAMETERS DESCRIBING HOW THE VIRTUAL POPULATION WAS GENERATED
+        self.method = method
+        self.label_smoothing = label_smoothing
+        self.noise_magnitude = noise_magnitude
+        # Number of virtual patients corresponding to each real patient
         self.num_per_patient = num_per_patient
-        self.num_patients = num_patients
-        self.X = torch.zeros((0, 11, 3), dtype=float)
-        self.y = torch.zeros((0,), dtype=float)
+        # Number of patients used for creating virtual patients
+        self.num_patients = (0,)
+        self.normalize_standardize = normalize_standardize
+
+        # self.X contains 11 time points with 3 input channels
+        #  (time, ACTH, CORT) for each time
+        self.X = torch.zeros((0, 11, 3))
+        # self.y indicates whether the patient was diagnosed with MDD
+        self.y = torch.zeros((0,))
+
+        # Flag indicating whether we need the training or test data
         self.test = test
-        self.combinations = None
-        self.fixed_perms = fixed_perms
+
+        # If we have combinations of test patients provided, combine them into
+        #  a tuple. Otherwise, set the population number to load
+        self.combinations = ()
         if control_combination and mdd_combination:
-            self.combinations = control_combination + mdd_combination
+            self.combinations = (control_combination, mdd_combination)
+        elif pop_number:
+            self.pop_number = pop_number
+        else:
+            raise ValueError('You must either provide combinations of test'
+                             'patients or a population number')
 
-        for group in self.patient_groups:
-            if self.test:
-                _, data = load_vpop_combinations(
-                    group, method, normalize_standardize,
-                    num_per_patient,
-                    control_combination if group == 'Control' else mdd_combination,
-                    fixed_perms=fixed_perms, noise_magnitude=noise_magnitude
-                )
-            else:
-                data, _ = load_vpop_combinations(
-                    group, method, normalize_standardize,
-                    num_per_patient,
-                    control_combination if group == 'Control' else mdd_combination,
-                    fixed_perms=fixed_perms, noise_magnitude=noise_magnitude
+    def load_group(self, group: str, label: int,
+                   X: torch.Tensor, y: torch.Tensor, test: bool):
+        """Load a patient group (Control, Atypical, MDD, etc...) and cat it
+        onto the X and y tensors passed to this function. This iteratively
+        builds the data and label tensors as the function is called for each
+        patient group requested"""
+        # Note that we use label to index self.combinations and
+        #  self.num_patients in this function. This is valid because we always
+        #  expect the values for Control to appear first in these tuples
+        if not self.combinations:
+            vpop_and_train = torch.load(
+                f'Virtual Populations/{group}_{self.method}'
+                f'_{self.normalize_standardize}_{self.num_per_patient}_'
+                f'{self.num_patients[0]}_{self.pop_number}.txt'
+            )
+        else:
+            vpop_and_train = torch.load(
+                f'Virtual Populations/{group}'
+                f'_{self.method}{self.noise_magnitude if self.noise_magnitude else ""}'
+                f'_{self.normalize_standardize}_{self.num_per_patient}_'
+                f'testPatients{self.combinations[label]}_fixedperms.txt'
+            )
+        if test:
+            X_tmp = vpop_and_train[self.num_patients[label]*self.num_per_patient:,...]
+        else:
+            X_tmp = vpop_and_train[
+                :self.num_patients[label]*self.num_per_patient,...
+            ]
 
-                )
-            self.X = torch.cat((self.X, data), 0)
-            if group == 'Control':
-                if self.test:
-                    self.y = torch.cat(
-                        (self.y, torch.zeros(15 - num_patients)+label_smoothing), 0
-                    )
-                else:
-                    self.y = torch.cat(
-                        (self.y, torch.zeros(num_per_patient*num_patients)+label_smoothing), 0
-                    )
-            else:
-                if self.test:
-                    if self.fixed_perms:
-                        self.y = torch.cat(
-                            (self.y, torch.ones(len(mdd_combination))-label_smoothing), 0
-                        )
-                    else:
-                        if group == 'Melancholic':
-                            self.y = torch.cat(
-                                (self.y, torch.ones(15 - num_patients)-label_smoothing), 0
-                            )
-                        else:
-                            self.y = torch.cat(
-                                (self.y, torch.ones(14 - num_patients)-label_smoothing), 0
-                            )
-                else:
-                    self.y = torch.cat(
-                        (self.y, torch.ones(num_per_patient*num_patients)-label_smoothing), 0
-                    )
+        X = torch.cat((X, X_tmp), 0)
+
+        y_tmp = torch.zeros((X_tmp.shape[0],)) if label==0 \
+                    else torch.ones((X_tmp.shape[0],))
+        y = torch.cat((y, y_tmp), 0)
+        return (X, y)
 
     def __len__(self):
+        "Return the total number of patients in the dataset"
         length = 0
-        if self.fixed_perms and self.test:
-            return len(self.combinations)
-        for group in self.patient_groups:
-            if self.test:
-                if group in ['Control', 'Melancholic']:
-                    length += 15 - self.num_patients
-                else:
-                    length += 14 - self.num_patients
+        if self.test:
+            # If we have fixed combinations of test patients, return the sum of
+            #  the combination lengths
             if self.combinations:
-                len_mdd = len(self.combinations) - 5
-                if group in ['Control', 'Melancholic']:
-                    length += (10*self.num_per_patient)
-                else:
-                    length += (14 - len_mdd)*self.num_per_patient
-            else:
-                length += self.num_per_patient*self.num_patients
+                return np.sum([len(combo) for combo in self.combinations])
 
-        return length
+            # Otherwise, we must be using the NelsonVirtualPopulation with
+            #  the old pop_number way of dividing the groups for testing, so
+            #  just add the group length minus num_patients for each group
+            for idx, group in enumerate(self.patient_groups):
+                length += self.group_info[group][0] - self.num_patients[idx]
+            return length
+
+        return np.sum(self.num_patients)*self.num_per_patient
 
     def __getitem__(self, idx):
+        "Get the requested patient data and label for index idx"
         return self.X[idx,...], self.y[idx]
 
 
-class FullVirtualPopulation(Dataset):
+class NelsonVirtualPopulation(BaseVirtualPopulation):
+    def __init__(self, patient_groups, method, normalize_standardize,
+                 num_per_patient, pop_number=0,
+                 control_combination=(), mdd_combination=(),
+                 test=False, label_smoothing=0.,
+                 noise_magnitude=0.):
+        super().__init__(method, normalize_standardize,
+                         num_per_patient, control_combination, mdd_combination,
+                         test, label_smoothing, noise_magnitude, pop_number)
+
+        # Length and label for each patient group in the dataset
+        self.group_info = {
+            'Control': (15, 0),
+            'Melancholic': (15, 1),
+            'Atypical': (14, 1),
+            'Neither': (14, 1)
+        }
+        self.patient_groups = patient_groups
+
+        if not self.combinations:
+            # Because we will never be using more than 2 groups at a time, and
+            #  all of the old virtual populations generated have
+            #  num_patients=10, I'm just setting this to a tuple of 10s for
+            #  convenience
+            self.num_patients = (10, 10)
+        # Otherwise, we set num_patients to the length of the groups minus the
+        #  corresponding number of test patients
+        self.num_patients = (
+            self.group_info[patient_groups[0]][0]-len(control_combination),
+            self.group_info[patient_groups[1]][0]-len(mdd_combination)
+        )
+
+        for group in self.patient_groups:
+            (self.X, self.y) = self.load_group(
+                group, self.group_info[group][1],
+                self.X, self.y, self.test
+            )
+
+
+class FullVirtualPopulation(BaseVirtualPopulation):
     def __init__(self, method, noise_magnitude,
                  normalize_standardize, num_per_patient,
                  control_combination, mdd_combination,
                  test=False, label_smoothing=0.):
+        super().__init__(
+            method, normalize_standardize, num_per_patient,
+            control_combination, mdd_combination, test, label_smoothing,
+            noise_magnitude
+        )
+        # Length and label for each patient group in the dataset
+        self.group_info = {
+            'Control': (52, 0),
+            'MDD': (56, 1)
+        }
         self.patient_groups = ['Control', 'MDD']
-        self.num_per_patient = num_per_patient
-        self.num_mdd_patients = 56 - len(mdd_combination)
-        self.num_control_patients = 52 - len(control_combination)
-        self.X = torch.zeros((0, 11, 3), dtype=float)
-        self.y = torch.zeros((0,), dtype=float)
-        self.test = test
-        self.combinations = control_combination + mdd_combination
+
+        self.num_patients = (
+            self.group_info['Control'][0] - len(control_combination),
+            self.group_info['MDD'][0] - len(mdd_combination)
+        )
 
         for group in self.patient_groups:
-            if self.test:
-                _, data = load_full_vpop_combinations(
-                    group, method, normalize_standardize,
-                    num_per_patient,
-                    control_combination if group == 'Control' else mdd_combination,
-                    self.num_control_patients if group == 'Control' else self.num_mdd_patients,
-                    noise_magnitude=noise_magnitude
-                )
-            else:
-                data, _ = load_full_vpop_combinations(
-                    group, method, normalize_standardize,
-                    num_per_patient,
-                    control_combination if group == 'Control' else mdd_combination,
-                    self.num_control_patients if group == 'Control' else self.num_mdd_patients,
-                    noise_magnitude=noise_magnitude
-                )
-            self.X = torch.cat((self.X, data), 0)
-            if group == 'Control':
-                if self.test:
-                    self.y = torch.cat(
-                        (self.y, torch.zeros(len(control_combination))+label_smoothing), 0
-                    )
-                else:
-                    self.y = torch.cat(
-                        (self.y, torch.zeros(num_per_patient*self.num_control_patients)+label_smoothing), 0
-                    )
-            else:
-                if self.test:
-                    self.y = torch.cat(
-                        (self.y, torch.ones(len(mdd_combination))-label_smoothing), 0
-                    )
-                else:
-                    self.y = torch.cat(
-                        (self.y, torch.ones(num_per_patient*self.num_mdd_patients)-label_smoothing), 0
-                    )
-
-    def __len__(self):
-        if self.test:
-            return len(self.combinations)
-        else:
-            return (self.num_control_patients + self.num_mdd_patients)*self.num_per_patient
-
-    def __getitem__(self, idx):
-        return self.X[idx,...], self.y[idx]
+            (self.X, self.y) = self.load_group(
+                group, self.group_info[group][1],
+                self.X, self.y, test
+            )
 
 
-class FullVirtualPopulation_ByLab(Dataset):
+class FullVirtualPopulation_ByLab(BaseVirtualPopulation):
     def __init__(self, method, noise_magnitude,
                  normalize_standardize, num_per_patient,
                  nelson_combination, ableson_combination,
                  test=False):
-        self.num_per_patient = num_per_patient
-        self.num_nelson_patients = 58 - len(nelson_combination)
-        self.num_ableson_patients = 50 - len(ableson_combination)
-        self.X = torch.zeros((0, 11, 3), dtype=float)
-        self.y = torch.zeros((0,), dtype=float)
-        self.test = test
-        self.combinations = nelson_combination + ableson_combination
+        super().__init__(
+            method, normalize_standardize, num_per_patient,
+            nelson_combination, ableson_combination,
+            test, noise_magnitude=noise_magnitude
+        )
+        # Length and label for each patient group in the dataset
+        self.group_info = {
+            'Nelson': (58, 0),
+            'Ableson': (50, 1)
+        }
+        self.patient_groups = ['Nelson', 'Ableson']
 
-        for lab in ['Nelson', 'Ableson']:
-            if self.test:
-                _, data = load_full_vpop_combinations_by_lab(
-                    lab, method, normalize_standardize,
-                    num_per_patient,
-                    nelson_combination if lab == 'Nelson' else ableson_combination,
-                    self.num_nelson_patients if lab == 'Nelson' else self.num_ableson_patients,
-                    noise_magnitude=noise_magnitude
-                )
-            else:
-                data, _ = load_full_vpop_combinations_by_lab(
-                    lab, method, normalize_standardize,
-                    num_per_patient,
-                    nelson_combination if lab == 'Nelson' else ableson_combination,
-                    self.num_nelson_patients if lab == 'Nelson' else self.num_ableson_patients,
-                    noise_magnitude=noise_magnitude
-                )
-            self.X = torch.cat((self.X, data), 0)
-            if lab == 'Nelson':
-                if self.test:
-                    self.y = torch.cat(
-                        (self.y, torch.zeros(len(nelson_combination))), 0
-                    )
-                else:
-                    self.y = torch.cat(
-                        (self.y, torch.zeros(num_per_patient*self.num_nelson_patients)), 0
-                    )
-            else:
-                if self.test:
-                    self.y = torch.cat(
-                        (self.y, torch.ones(len(ableson_combination))), 0
-                    )
-                else:
-                    self.y = torch.cat(
-                        (self.y, torch.ones(num_per_patient*self.num_ableson_patients)), 0
-                    )
+        self.num_patients = (
+            self.group_info['Nelson'][0] - len(nelson_combination),
+            self.group_info['Ableson'][1] - len(ableson_combination)
+        )
 
-    def __len__(self):
-        if self.test:
-            return len(self.combinations)
-        else:
-            return (self.num_nelson_patients + self.num_ableson_patients)*self.num_per_patient
-
-    def __getitem__(self, idx):
-        return self.X[idx,...], self.y[idx]
+        for group in self.patient_groups:
+            (self.X, self.y) = self.load_group(
+                group, self.group_info[group][1],
+                self.X, self.y, test
+            )
 
 
-def load_vpop(patient_group, method, normalize_standardize, num_per_patient,
-              num_patients, pop_number):
-    vpop_and_train = torch.load(f'Virtual Populations/{patient_group}_{method}'
-                                f'_{normalize_standardize}_{num_per_patient}_'
-                                f'{num_patients}_{pop_number}.txt')
-    vpop = vpop_and_train[:1000,...]
-    test = vpop_and_train[1000:,...]
-
-    return vpop, test
-
-
-def load_vpop_combinations(patient_group, method, normalize_standardize, num_per_patient,
-              combination, fixed_perms, noise_magnitude=None):
-    if fixed_perms:
-        vpop_and_train = torch.load(f'Virtual Populations/{patient_group}'
-                                    f'_{method}{noise_magnitude if noise_magnitude else ""}'
-                                    f'_{normalize_standardize}_{num_per_patient}_'
-                                    f'testPatients{combination}_fixedperms.txt')
-    else:
-        vpop_and_train = torch.load(f'Virtual Populations/{patient_group}_{method}{noise_magnitude if noise_magnitude else ""}'
-                                    f'_{normalize_standardize}_{num_per_patient}_'
-                                    f'testPatients{combination}.txt')
-    if patient_group in ['Atypical', 'Neither']:
-        vpop = vpop_and_train[:(14 - len(combination))*num_per_patient,...]
-        test = vpop_and_train[(14 - len(combination))*num_per_patient:,...]
-    else:
-        vpop = vpop_and_train[:1000,...]
-        test = vpop_and_train[1000:,...]
-
-    return vpop, test
-
-
-def load_full_vpop_combinations(patient_group, method, normalize_standardize,
-                                num_per_patient, combination, num_patients,
-                                noise_magnitude=None):
-    vpop_and_train = torch.load(f'Virtual Populations/{patient_group}'
-                                f'_{method}{noise_magnitude if noise_magnitude else ""}'
-                                f'_{normalize_standardize}_{num_per_patient}_'
-                                f'testPatients{combination}_fixedperms.txt')
-    vpop = vpop_and_train[:num_patients*num_per_patient,...]
-    test = vpop_and_train[num_patients*num_per_patient:,...]
-    return vpop, test
-
-
-def load_full_vpop_combinations_by_lab(lab, method, normalize_standardize, num_per_patient,
-              combination, num_patients, noise_magnitude):
-    vpop_and_train = torch.load(f'Virtual Populations/{lab}'
-                                f'_{method}{noise_magnitude}'
-                                f'_{normalize_standardize}_{num_per_patient}_'
-                                f'testPatients{combination}_fixedperms.txt')
-    vpop = vpop_and_train[:num_patients*num_per_patient,...]
-    test = vpop_and_train[num_patients*num_per_patient:,...]
-    return vpop, test
-
-
+# For debugging purposes
+if __name__ == '__main__':
+    # data = NelsonVirtualPopulation(
+    #     ['Control', 'Atypical'], 'Uniform', 'Standardize', 100,
+    #     control_combination=(0,9,3,7,4), mdd_combination=(0,7,12,8,11),
+    # )
+    data = FullVirtualPopulation(
+        'Uniform', 0.1, 'StandardizeAll', 100, (30,11,3,38,29),
+        (41,8,15,16,33)
+    )
+    loader = DataLoader(data)
+    for batch in loader:
+        print(batch)
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #

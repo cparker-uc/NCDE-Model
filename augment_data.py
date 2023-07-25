@@ -1,7 +1,7 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Thu Jul 20, 2023 | 03:16P EDT
+# Last Modified: Mon Jul 24, 2023 | 01:56P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
@@ -11,7 +11,7 @@ NUM_PER_PATIENT = 100
 NUM_PATIENTS = 10
 NUM_POPS = 5
 METHOD = 'Uniform'
-NOISE_MAGNITUDE = 0.1
+NOISE_MAGNITUDE = 0.01
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
 
 import torch
@@ -171,6 +171,8 @@ def generate_3combinations():
             random_permutation = permutations[2]
         case 'Neither':
             random_permutation = permutations[3]
+        case _:
+            return
 
     # random_permutation = torch.randperm(15 if PATIENT_GROUP in ['Control', 'Melancholic'] else 14)
 
@@ -286,11 +288,11 @@ if __name__ == '__main__':
     # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
     #     generate_all_pop_combinations()
 
-    for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
-        generate_3combinations()
+    # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
+    #     generate_3combinations()
 
-#     for PATIENT_GROUP in ['MDD', 'Control']:
-#         generate_full_combinations(5)
+    for PATIENT_GROUP in ['MDD', 'Control']:
+        generate_full_combinations(5)
 
     # x = generate_full_combinations_by_lab('Ableson', 5)
 

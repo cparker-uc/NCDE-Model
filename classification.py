@@ -1,12 +1,12 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Thu Jul 20, 2023 | 03:33P EDT
+# Last Modified: Tue Jul 25, 2023 | 11:30P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
 # Network architecture parameters
-INPUT_CHANNELS = 3
+INPUT_CHANNELS = 2
 HDIM = 32
 OUTPUT_CHANNELS = 1
 
@@ -19,1286 +19,170 @@ ATOL = 1e-8
 RTOL = 1e-6
 
 # Training data selection parameters
-PATIENT_GROUPS = ['Control', 'MDD']
 METHOD = 'Uniform'
-NORMALIZE_STANDARDIZE = 'StandardizeAll'
-NOISE_MAGNITUDE = 0.1
+NORMALIZE_STANDARDIZE = 'Standardize'
+NOISE_MAGNITUDE = 0.05
 NUM_PER_PATIENT = 100
-NUM_PATIENTS = 10
-POP_NUMBER = 1
+POP_NUMBER = 0
 BATCH_SIZE = 200
 LABEL_SMOOTHING = 0
 DROPOUT = 0
+CORT_ONLY = True
+# These variables determine which population groups to train/test using
+#  Should be 3 for both if using NelsonOnly data, 11 for control and 12 for MDD
+#  if using FullVPOP or 12 for control and 10 for MDD if using FullVPOPByLab
+CTRL_RANGE = list(range(3))
+MDD_RANGE = list(range(3))
 
 
-# from IPython.core.debugger import set_trace
-import os
-import time
+import sys
 import torch
-import torchcde
-import torch.optim as optim
-import pandas as pd
 
-from itertools import combinations
-from copy import copy
-from torch.utils.data import DataLoader
-from torch.nn.functional import binary_cross_entropy_with_logits
-from typing import Tuple
-from get_data import NelsonData
-from get_augmented_data import (NelsonVirtualPopulation, FullVirtualPopulation,
-                                FullVirtualPopulation_ByLab)
-from neural_cde import NeuralCDE
+# from typing import Tuple
+from training import train
+from testing import test
+
 
 # Define the device with which to train networks
 DEVICE = torch.device('cpu')
 
 # Not certain if this is necessary, but in the quickstart docs they have
 #  done a wildcard import of torchdyn base library, and this is all that does
-TTuple = Tuple[torch.Tensor, torch.Tensor]
+# TTuple = Tuple[torch.Tensor, torch.Tensor]
 
-
-def load_data(virtual=True, control_combination=None, mdd_combination=None):
-    pass
-
-def main(virtual=True, use_combinations=False):
-
-    # Ensure that these variables are not unbound, so that we can reference them
-    #  when writing the setup file
-    control_combination = None
-    mdd_combination = None
-    if not virtual:
-        dataset = NelsonData(
-            'Nelson TSST Individual Patient Data',
-            patient_groups=PATIENT_GROUPS,
-            normalize_standardize=NORMALIZE_STANDARDIZE
-        )
-    elif use_combinations:
-        all_combos_control = combinations(range(15), 5)
-        all_combos_melancholic = copy(all_combos_control)
-        all_combos_atypical_neither = combinations(range(14), 4)
-
-        random_control = torch.randint(0, 3002, (1,))
-        random_melancholic = torch.randint(0, 3002, (1,))
-        random_atypical_neither = torch.randint(0, 1000, (1,))
-
-        control_combination = [combo for combo in all_combos_control][random_control]
-        mdd_combination = [combo for combo in all_combos_melancholic][random_melancholic] if PATIENT_GROUP == 'Melancholic' else [combo for combo in all_combos_atypical_neither][random_atypical_neither]
-
-        dataset = NelsonVirtualPopulation(
-            patient_groups=PATIENT_GROUPS,
-            method=METHOD,
-            normalize_standardize=NORMALIZE_STANDARDIZE,
-            num_per_patient=NUM_PER_PATIENT,
-            num_patients=NUM_PATIENTS,
-            control_combination=control_combination,
-            mdd_combination=mdd_combination,
-            test=False,
-            label_smoothing=LABEL_SMOOTHING
-        )
-    else:
-        dataset = NelsonVirtualPopulation(
-            patient_groups=PATIENT_GROUPS,
-            method=METHOD,
-            normalize_standardize=NORMALIZE_STANDARDIZE,
-            num_per_patient=NUM_PER_PATIENT,
-            num_patients=NUM_PATIENTS,
-            pop_number=POP_NUMBER,
-            test=False,
-            label_smoothing=LABEL_SMOOTHING
-        )
-    # Time points we need the solver to output
-    t_eval = dataset[0][0][:,0].contiguous()
-
-    dataloader = DataLoader(
-        dataset=dataset, batch_size=BATCH_SIZE, shuffle=True
-    )
-    model = NeuralCDE(
-        INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS, t_interval=t_eval,
-        device=DEVICE, dropout=DROPOUT
-    ).double()
-
-    optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=DECAY)
-
-    # loss = nn.CrossEntropyLoss()
-    loss_over_time = []
-
-    start_time = time.time()
-    if use_combinations:
-        print(f'Starting Training on {PATIENT_GROUP} Test Groups: Control {control_combination} {PATIENT_GROUP} {mdd_combination}')
-    else:
-        print(f'Starting Training on {PATIENT_GROUP} Population Number {POP_NUMBER}')
-    for itr in range(1, ITERS+1):
-        for j, (data, labels) in enumerate(dataloader):
-            coeffs = torchcde.\
-                hermite_cubic_coefficients_with_backward_differences(
-                    data, t=t_eval
-                )
-
-            optimizer.zero_grad()
-
-            # Compute the forward direction of the NODE
-            pred_y = model(coeffs).squeeze(-1)
-
-            # Compute the loss based on the results
-            output = binary_cross_entropy_with_logits(pred_y, labels)
-            loss_over_time.append((j, output.item()))
-
-            # Backpropagate through the adjoint of the NODE to compute gradients
-            #  WRT each parameter
-            output.backward()
-
-            # Use the gradients calculated through backpropagation to adjust the
-            #  parameters
-            optimizer.step()
-
-            # If this is the first iteration, or a multiple of 100, present the
-            #  user with a progress report
-            if (itr == 1) or (itr % 10 == 0):
-                print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
-
-        # If itr is a multiple of OPT_RESET, re-initialize the optimizer to
-        #  reset the learning rate and momentum
-        if OPT_RESET is None:
-            pass
-        elif itr % OPT_RESET == 0:
-            optimizer = optim.AdamW(
-                model.parameters(), lr=LR, weight_decay=DECAY
-            )
-
-        if itr % 100 == 0:
-            runtime = time.time() - start_time
-            print(f"Runtime: {runtime:.6f} seconds")
-            torch.save(
-                model.state_dict(),
-                f'Network States (VPOP Training)/NN_state_2HL_128nodes_NCDE_'
-                f"{METHOD}{'Virtual' if virtual else 'Real'}{PATIENT_GROUP}"
-                f'{POP_NUMBER if not use_combinations else [control_combination, mdd_combination]}_'
-                f'{NUM_PER_PATIENT}perPatient_'
-                f'batchsize{BATCH_SIZE}_'
-                f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-                f'smoothing{LABEL_SMOOTHING}_'
-                f'dropout{DROPOUT}.txt'
-            )
-            with open(f'Network States (VPOP Training)/NN_state_2HL_128nodes_'
-                      f"NCDE_{METHOD}{'Virtual' if virtual else 'Real'}"
-                      f'{PATIENT_GROUP}{POP_NUMBER if not use_combinations else [control_combination, mdd_combination]}_'
-                      f'{NUM_PER_PATIENT}perPatient_'
-                      f'batchsize{BATCH_SIZE}_'
-                      f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-                      f'smoothing{LABEL_SMOOTHING}_setup_'
-                      f'dropout{DROPOUT}.txt',
-                      'w+') as file:
-                file.write(
-                    f'Model Setup for {METHOD} '
-                    "{'virtual' if virtual else 'real'} "
-                    '{PATIENT_GROUP} Trained Network:\n\n'
-                )
-                file.write(
-                    'Network Architecture Parameters\n'
-                    f'Input channels={INPUT_CHANNELS}\n'
-                    f'Hidden channels={HDIM}\n'
-                    f'Output channels={OUTPUT_CHANNELS}\n\n'
-                    'Training hyperparameters\n'
-                    f'Optimizer={optimizer}'
-                    f'Training Iterations={itr}\n'
-                    f'Learning rate={LR}\n'
-                    f'Weight decay={DECAY}\n'
-                    f'Optimizer reset frequency={OPT_RESET}\n\n'
-                    'Dropout probability '
-                    f'(after initial linear layer before NCDE): {DROPOUT}\n'
-                    'Training Data Selection Parameters\n'
-                    '(If not virtual, the only important params are the groups'
-                    ' and whether data was normalized/standardized)\n'
-                    f'Patient groups={PATIENT_GROUPS}\n'
-                    f'Augmentation strategy={METHOD}\n'
-                    f'Normalized/standardized={NORMALIZE_STANDARDIZE}\n'
-                    'Number of virtual patients'
-                    f' per real patient={NUM_PER_PATIENT}\n'
-                    'Number of real patients sampled from each group='
-                    f'{NUM_PATIENTS}\n'
-                    f'Label smoothing factor={LABEL_SMOOTHING}\n'
-                    f'Virtual population number used={POP_NUMBER}\n'
-                    'Test Patient Combinations:\n'
-                    f'Control: {control_combination}\n'
-                    f'{PATIENT_GROUP}: {mdd_combination}\n'
-                    f'Training batch size={BATCH_SIZE}\n'
-                    'Training Results:\n'
-                    f'Runtime={runtime}\n'
-                    f'Loss over time={loss_over_time}'
-                    # Currently not using:
-                    # f'ATOL={ATOL}\nRTOL={RTOL}\n'
-                )
-
-
-def main_given_perms(permutations):
-    # Ensure that these variables are not unbound, so that we can reference them
-    #  when writing the setup file
-    for combo in [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]:
-        control_combination = tuple(permutations[0][combo[0]*5:(combo[0]+1)*5])
-        mdd_combination = tuple(permutations[1][combo[1]*5:((combo[1]+1)*5) if (combo[1]+1)*5 < len(permutations[1]) else len(permutations[1])])
-
-        dataset = NelsonVirtualPopulation(
-            patient_groups=PATIENT_GROUPS,
-            method=METHOD,
-            normalize_standardize=NORMALIZE_STANDARDIZE,
-            num_per_patient=NUM_PER_PATIENT,
-            num_patients=NUM_PATIENTS,
-            control_combination=control_combination,
-            mdd_combination=mdd_combination,
-            fixed_perms=True,
-            test=False,
-            label_smoothing=LABEL_SMOOTHING,
-            noise_magnitude=NOISE_MAGNITUDE
-        )
-        # Time points we need the solver to output
-        t_eval = dataset[0][0][:,0].contiguous().to(DEVICE)
-
-        dataloader = DataLoader(
-            dataset=dataset, batch_size=BATCH_SIZE, shuffle=True
-        )
-        # SET INPUT_CHANNELS TO 2 HERE FOR CORT ONLY
-        model = NeuralCDE(
-            INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS, t_interval=t_eval,
-            device=DEVICE, dropout=DROPOUT
-        ).double()
-
-        optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=DECAY)
-
-        # loss = nn.CrossEntropyLoss()
-        loss_over_time = []
-
-        start_time = time.time()
-        print(f'Starting Training on {PATIENT_GROUP} Test Groups: Control {control_combination} {PATIENT_GROUP} {mdd_combination}')
-        for itr in range(1, ITERS+1):
-            for j, (data, labels) in enumerate(dataloader):
-                data = data[...,:2].to(DEVICE)
-                labels = labels.to(DEVICE)
-                coeffs = torchcde.\
-                    hermite_cubic_coefficients_with_backward_differences(
-                        data, t=t_eval
-                    )
-
-                optimizer.zero_grad()
-
-                # Compute the forward direction of the NODE
-                pred_y = model(coeffs).squeeze(-1)
-
-                # Compute the loss based on the results
-                output = binary_cross_entropy_with_logits(pred_y, labels)
-                loss_over_time.append((j, output.item()))
-
-                # Backpropagate through the adjoint of the NODE to compute gradients
-                #  WRT each parameter
-                output.backward()
-
-                # Use the gradients calculated through backpropagation to adjust the
-                #  parameters
-                optimizer.step()
-
-                # If this is the first iteration, or a multiple of 100, present the
-                #  user with a progress report
-                if (itr == 1) or (itr % 10 == 0):
-                    print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
-
-            # If itr is a multiple of OPT_RESET, re-initialize the optimizer to
-            #  reset the learning rate and momentum
-            if OPT_RESET is None:
-                pass
-            elif itr % OPT_RESET == 0:
-                optimizer = optim.AdamW(
-                    model.parameters(), lr=LR, weight_decay=DECAY
-                )
-
-            if itr % 100 == 0:
-                runtime = time.time() - start_time
-                print(f"Runtime: {runtime:.6f} seconds")
-                torch.save(
-                    model.state_dict(),
-                    f'Network States (VPOP Training)/'
-                    f'NN_state_{HDIM}nodes_NCDE_'
-                    f'{METHOD}{NOISE_MAGNITUDE}Virtual_{PATIENT_GROUP}_'
-                    f'Control{control_combination}_{PATIENT_GROUP}{mdd_combination}_'
-                    f'{NUM_PER_PATIENT}perPatient_'
-                    f'batchsize{BATCH_SIZE}_'
-                    f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-                    f'smoothing{LABEL_SMOOTHING}_'
-                    f'dropout{DROPOUT}.txt'
-                )
-                with open(f'Network States (VPOP Training)/'
-                          f'NN_state_{HDIM}nodes_NCDE_'
-                          f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
-                          f'{PATIENT_GROUP}_'
-                          f'Control{control_combination}_'
-                          f'{PATIENT_GROUP}{mdd_combination}_'
-                          f'{NUM_PER_PATIENT}perPatient_'
-                          f'batchsize{BATCH_SIZE}_'
-                          f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-                          f'smoothing{LABEL_SMOOTHING}_setup_'
-                          f'dropout{DROPOUT}.txt',
-                          'w+') as file:
-                    file.write(
-                        f'Model Setup for {METHOD} '
-                        "virtual "
-                        '{PATIENT_GROUP} Trained Network:\n\n'
-                    )
-                    file.write(
-                        'Network Architecture Parameters\n'
-                        f'Input channels={INPUT_CHANNELS}\n'
-                        f'Hidden channels={HDIM}\n'
-                        f'Output channels={OUTPUT_CHANNELS}\n\n'
-                        'Training hyperparameters\n'
-                        f'Optimizer={optimizer}'
-                        f'Training Iterations={itr}\n'
-                        f'Learning rate={LR}\n'
-                        f'Weight decay={DECAY}\n'
-                        f'Optimizer reset frequency={OPT_RESET}\n\n'
-                        'Dropout probability '
-                        f'(after initial linear layer before NCDE): {DROPOUT}\n'
-                        'Training Data Selection Parameters\n'
-                        '(If not virtual, the only important params are the groups'
-                        ' and whether data was normalized/standardized)\n'
-                        f'Patient groups={PATIENT_GROUPS}\n'
-                        f'Augmentation strategy={METHOD}\n'
-                        f'Normalized/standardized={NORMALIZE_STANDARDIZE}\n'
-                        'Number of virtual patients'
-                        f' per real patient={NUM_PER_PATIENT}\n'
-                        'Number of real patients sampled from each group='
-                        f'{NUM_PATIENTS}\n'
-                        f'Label smoothing factor={LABEL_SMOOTHING}\n'
-                        f'Virtual population number used={POP_NUMBER}\n'
-                        'Test Patient Combinations:\n'
-                        f'Control: {control_combination}\n'
-                        f'{PATIENT_GROUP}: {mdd_combination}\n'
-                        f'Training batch size={BATCH_SIZE}\n'
-                        'Training Results:\n'
-                        f'Runtime={runtime}\n'
-                        f'Loss over time={loss_over_time}'
-                        # Currently not using:
-                        # f'ATOL={ATOL}\nRTOL={RTOL}\n'
-                    )
-
-
-def main_cort_only(permutations):
-    # Ensure that these variables are not unbound, so that we can reference them
-    #  when writing the setup file
-    for ctrl_num in range(3):
-        for mdd_num in range(3):
-            control_combination = tuple(permutations[0][ctrl_num*5:(ctrl_num+1)*5])
-            mdd_combination = tuple(permutations[1][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(permutations[1]) else len(permutations[1])])
-
-            dataset = NelsonVirtualPopulation(
-                patient_groups=PATIENT_GROUPS,
-                method=METHOD,
-                normalize_standardize=NORMALIZE_STANDARDIZE,
-                num_per_patient=NUM_PER_PATIENT,
-                num_patients=NUM_PATIENTS,
-                control_combination=control_combination,
-                mdd_combination=mdd_combination,
-                fixed_perms=True,
-                test=False,
-                label_smoothing=LABEL_SMOOTHING,
-                noise_magnitude=NOISE_MAGNITUDE
-            )
-            # Time points we need the solver to output
-            t_eval = dataset[0][0][:,0].contiguous().to(DEVICE)
-
-            dataloader = DataLoader(
-                dataset=dataset, batch_size=BATCH_SIZE, shuffle=True
-            )
-            # SET INPUT_CHANNELS TO 2 HERE FOR CORT ONLY
-            model = NeuralCDE(
-                2, HDIM, OUTPUT_CHANNELS, t_interval=t_eval,
-                device=DEVICE, dropout=DROPOUT
-            ).double()
-
-            optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=DECAY)
-
-            # loss = nn.CrossEntropyLoss()
-            loss_over_time = []
-
-            start_time = time.time()
-            print(f'Starting Training on {PATIENT_GROUP} Test Groups: Control {control_combination} {PATIENT_GROUP} {mdd_combination}')
-            for itr in range(1, ITERS+1):
-                for j, (data, labels) in enumerate(dataloader):
-                    data = data[...,:2].to(DEVICE)
-                    labels = labels.to(DEVICE)
-                    coeffs = torchcde.\
-                        hermite_cubic_coefficients_with_backward_differences(
-                            data, t=t_eval
-                        )
-
-                    optimizer.zero_grad()
-
-                    # Compute the forward direction of the NODE
-                    pred_y = model(coeffs).squeeze(-1)
-
-                    # Compute the loss based on the results
-                    output = binary_cross_entropy_with_logits(pred_y, labels)
-                    loss_over_time.append((j, output.item()))
-
-                    # Backpropagate through the adjoint of the NODE to compute gradients
-                    #  WRT each parameter
-                    output.backward()
-
-                    # Use the gradients calculated through backpropagation to adjust the
-                    #  parameters
-                    optimizer.step()
-
-                    # If this is the first iteration, or a multiple of 100, present the
-                    #  user with a progress report
-                    if (itr == 1) or (itr % 10 == 0):
-                        print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
-
-                # If itr is a multiple of OPT_RESET, re-initialize the optimizer to
-                #  reset the learning rate and momentum
-                if OPT_RESET is None:
-                    pass
-                elif itr % OPT_RESET == 0:
-                    optimizer = optim.AdamW(
-                        model.parameters(), lr=LR, weight_decay=DECAY
-                    )
-
-                if itr % 100 == 0:
-                    runtime = time.time() - start_time
-                    print(f"Runtime: {runtime:.6f} seconds")
-                    torch.save(
-                        model.state_dict(),
-                        f'Network States (CORT ONLY VPOP Training)/By Diagnosis/'
-                        f'Control {ctrl_num} {control_combination}/'
-                        f'{PATIENT_GROUP} {mdd_num} {mdd_combination}/'
-                        f'NN_state_{HDIM}nodes_NCDE_'
-                        f'{METHOD}{NOISE_MAGNITUDE}Virtual_{PATIENT_GROUP}_'
-                        f'Control{control_combination}_{PATIENT_GROUP}{mdd_combination}_'
-                        f'{NUM_PER_PATIENT}perPatient_'
-                        f'batchsize{BATCH_SIZE}_'
-                        f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-                        f'smoothing{LABEL_SMOOTHING}_'
-                        f'dropout{DROPOUT}.txt'
-                    )
-                    with open(f'Network States (CORT ONLY VPOP Training)/By Diagnosis/'
-                              f'Control {ctrl_num} {control_combination}/'
-                              f'{PATIENT_GROUP} {mdd_num} {mdd_combination}/'
-                              f'NN_state_{HDIM}nodes_NCDE_'
-                              f'{METHOD}{NOISE_MAGNITUDE}Virtual_{PATIENT_GROUP}_'
-                              f'Control{control_combination}_{PATIENT_GROUP}{mdd_combination}_'
-                              f'{NUM_PER_PATIENT}perPatient_'
-                              f'batchsize{BATCH_SIZE}_'
-                              f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-                              f'smoothing{LABEL_SMOOTHING}_setup_'
-                              f'dropout{DROPOUT}.txt',
-                              'w+') as file:
-                        file.write(
-                            f'Model Setup for {METHOD} '
-                            "virtual "
-                            '{PATIENT_GROUP} Trained Network:\n\n'
-                        )
-                        file.write(
-                            'Network Architecture Parameters\n'
-                            f'Input channels={INPUT_CHANNELS}\n'
-                            f'Hidden channels={HDIM}\n'
-                            f'Output channels={OUTPUT_CHANNELS}\n\n'
-                            'Training hyperparameters\n'
-                            f'Optimizer={optimizer}'
-                            f'Training Iterations={itr}\n'
-                            f'Learning rate={LR}\n'
-                            f'Weight decay={DECAY}\n'
-                            f'Optimizer reset frequency={OPT_RESET}\n\n'
-                            'Dropout probability '
-                            f'(after initial linear layer before NCDE): {DROPOUT}\n'
-                            'Training Data Selection Parameters\n'
-                            '(If not virtual, the only important params are the groups'
-                            ' and whether data was normalized/standardized)\n'
-                            f'Patient groups={PATIENT_GROUPS}\n'
-                            f'Augmentation strategy={METHOD}\n'
-                            f'Normalized/standardized={NORMALIZE_STANDARDIZE}\n'
-                            'Number of virtual patients'
-                            f' per real patient={NUM_PER_PATIENT}\n'
-                            'Number of real patients sampled from each group='
-                            f'{NUM_PATIENTS}\n'
-                            f'Label smoothing factor={LABEL_SMOOTHING}\n'
-                            f'Virtual population number used={POP_NUMBER}\n'
-                            'Test Patient Combinations:\n'
-                            f'Control: {control_combination}\n'
-                            f'{PATIENT_GROUP}: {mdd_combination}\n'
-                            f'Training batch size={BATCH_SIZE}\n'
-                            'Training Results:\n'
-                            f'Runtime={runtime}\n'
-                            f'Loss over time={loss_over_time}'
-                            # Currently not using:
-                            # f'ATOL={ATOL}\nRTOL={RTOL}\n'
-                        )
-
-
-def main_full_vpop(permutations, by_lab=False):
-    # Ensure that these variables are not unbound, so that we can reference them
-    #  when writing the setup file
-    ctrl_range = [i for i in range(11,12)]
-    mdd_range = [i for i in range(10)]
-    for ctrl_num in ctrl_range:
-        for mdd_num in mdd_range:
-            control_combination = tuple(permutations[0][ctrl_num*5:(ctrl_num+1)*5])
-            mdd_combination = tuple(permutations[1][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(permutations[1]) else len(permutations[1])])
-
-            if not by_lab:
-                dataset = FullVirtualPopulation(
-                    method=METHOD,
-                    noise_magnitude=NOISE_MAGNITUDE,
-                    normalize_standardize=NORMALIZE_STANDARDIZE,
-                    num_per_patient=NUM_PER_PATIENT,
-                    control_combination=control_combination,
-                    mdd_combination=mdd_combination,
-                    test=False,
-                    label_smoothing=LABEL_SMOOTHING
-                )
-            else:
-                dataset = FullVirtualPopulation_ByLab(
-                    method=METHOD,
-                    noise_magnitude=NOISE_MAGNITUDE,
-                    normalize_standardize=NORMALIZE_STANDARDIZE,
-                    num_per_patient=NUM_PER_PATIENT,
-                    # Since Nelson is treated as control for the purposes of
-                    #  labeling, we use control_combination for the Nelson data
-                    #  and mdd_combination for the Ableson data
-                    nelson_combination=control_combination,
-                    ableson_combination=mdd_combination,
-                    test=False,
-                )
-
-            dataloader = DataLoader(
-                dataset=dataset, batch_size=BATCH_SIZE, shuffle=True
-            )
-            model = NeuralCDE(
-                INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
-                device=DEVICE, dropout=DROPOUT
-            ).double().to(DEVICE)
-
-            optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=DECAY)
-
-            # loss = nn.CrossEntropyLoss()
-            loss_over_time = []
-
-            start_time = time.time()
-            print(f'Starting Training with Test Groups: Control {control_combination}, MDD {mdd_combination}')
-            for itr in range(1, ITERS+1):
-                for j, (data, labels) in enumerate(dataloader):
-                    data = data.to(DEVICE)
-                    labels = labels.to(DEVICE)
-                    coeffs = torchcde.\
-                        hermite_cubic_coefficients_with_backward_differences(
-                            data
-                        )
-
-                    optimizer.zero_grad()
-
-                    # Compute the forward direction of the NODE
-                    pred_y = model(coeffs).squeeze(-1)
-
-                    # Compute the loss based on the results
-                    output = binary_cross_entropy_with_logits(pred_y, labels)
-                    loss_over_time.append((j, output.item()))
-
-                    # Backpropagate through the adjoint of the NODE to compute gradients
-                    #  WRT each parameter
-                    output.backward()
-
-                    # Use the gradients calculated through backpropagation to adjust the
-                    #  parameters
-                    optimizer.step()
-
-                    # If this is the first iteration, or a multiple of 100, present the
-                    #  user with a progress report
-                    if (itr == 1) or (itr % 10 == 0):
-                        print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
-
-                # If itr is a multiple of OPT_RESET, re-initialize the optimizer to
-                #  reset the learning rate and momentum
-                if OPT_RESET is None:
-                    pass
-                elif itr % OPT_RESET == 0:
-                    optimizer = optim.AdamW(
-                        model.parameters(), lr=LR, weight_decay=DECAY
-                    )
-
-                if itr % 100 == 0:
-                    runtime = time.time() - start_time
-                    print(f"Runtime: {runtime:.6f} seconds")
-                    torch.save(
-                        model.state_dict(),
-                        f'Network States (Full VPOP Training)/'
-                        f'{"By Lab" if by_lab else "By Diagnosis"}/'
-                        f'{"Control" if not by_lab else "Nelson"} '
-                        f'{ctrl_num} {control_combination}/'
-                        f'{"MDD" if not by_lab else "Ableson"} '
-                        f'{mdd_num} {mdd_combination}/'
-                        f'NN_state_{HDIM}nodes_NCDE_'
-                        f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
-                        f'Control{control_combination}_MDD{mdd_combination}_'
-                        f'{NUM_PER_PATIENT}perPatient_'
-                        f'batchsize{BATCH_SIZE}_'
-                        f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-                        f'smoothing{LABEL_SMOOTHING}_'
-                        f'dropout{DROPOUT}'
-                        f'{"_byLab" if by_lab else ""}.txt'
-                    )
-                    with open(f'Network States (Full VPOP Training)/'
-                              f'{"By Lab" if by_lab else "By Diagnosis"}/'
-                              f'{"Control" if not by_lab else "Nelson"} '
-                              f'{ctrl_num} {control_combination}/'
-                              f'{"MDD" if not by_lab else "Ableson"} '
-                              f'{mdd_num} {mdd_combination}/'
-                              f'NN_state_{HDIM}nodes_'
-                              f'NCDE_{METHOD}{NOISE_MAGNITUDE}Virtual_'
-                              f'Control{control_combination}_'
-                              f'MDD{mdd_combination}_'
-                              f'{NUM_PER_PATIENT}perPatient_'
-                              f'batchsize{BATCH_SIZE}_'
-                              f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-                              f'smoothing{LABEL_SMOOTHING}_'
-                              f'dropout{DROPOUT}{"_byLab" if by_lab else ""}'
-                              '_setup.txt',
-                              'w+') as file:
-                        file.write(
-                            f'Model Setup for {METHOD} '
-                            "virtual "
-                            '{PATIENT_GROUP} Trained Network:\n\n'
-                        )
-                        file.write(
-                            'Network Architecture Parameters\n'
-                            f'Input channels={INPUT_CHANNELS}\n'
-                            f'Hidden channels={HDIM}\n'
-                            f'Output channels={OUTPUT_CHANNELS}\n\n'
-                            'Training hyperparameters\n'
-                            f'Optimizer={optimizer}'
-                            f'Training Iterations={itr}\n'
-                            f'Learning rate={LR}\n'
-                            f'Weight decay={DECAY}\n'
-                            f'Optimizer reset frequency={OPT_RESET}\n\n'
-                            'Dropout probability '
-                            f'(after initial linear layer before NCDE): {DROPOUT}\n'
-                            'Training Data Selection Parameters\n'
-                            '(If not virtual, the only important params are the groups'
-                            ' and whether data was normalized/standardized)\n'
-                            f'Patient groups={PATIENT_GROUPS}\n'
-                            f'Augmentation strategy={METHOD}\n'
-                            f'Noise Magnitude={NOISE_MAGNITUDE}\n'
-                            f'Normalized/standardized={NORMALIZE_STANDARDIZE}\n'
-                            'Number of virtual patients'
-                            f' per real patient={NUM_PER_PATIENT}\n'
-                            'Number of real patients sampled from each group='
-                            f'{NUM_PATIENTS}\n'
-                            f'Label smoothing factor={LABEL_SMOOTHING}\n'
-                            'Test Patient Combinations:\n'
-                            f'Control: {control_combination}\n'
-                            f'MDD: {mdd_combination}\n'
-                            f'Training batch size={BATCH_SIZE}\n'
-                            'Training Results:\n'
-                            f'Runtime={runtime}\n'
-                            f'Loss over time={loss_over_time}'
-                            # Currently not using:
-                            # f'ATOL={ATOL}\nRTOL={RTOL}\n'
-                        )
-
-
-def test(method, patient_groups, num_per_patient, batch_size,
-         normalize_standardize, num_patients, input_channels, hdim,
-         output_channels, max_itr, ctrl_num=None, control_combination=None,
-         mdd_num=None, mdd_combination=None, pop_number=None, label_smoothing=0,
-         fixed_perms=False, state_dir='Network States (VPOP Training)',
-         cort_only=False):
-    patient_group = patient_groups[1]
-    if cort_only:
-        dataset = NelsonVirtualPopulation(
-            patient_groups=patient_groups,
-            method=method,
-            normalize_standardize=normalize_standardize,
-            num_per_patient=num_per_patient,
-            num_patients=num_patients,
-            control_combination=control_combination,
-            mdd_combination=mdd_combination,
-            fixed_perms=True,
-            test=True,
-            label_smoothing=label_smoothing,
-            noise_magnitude=NOISE_MAGNITUDE
-        )
-    elif fixed_perms:
-        dataset = NelsonVirtualPopulation(
-            patient_groups=patient_groups,
-            method=method,
-            normalize_standardize=normalize_standardize,
-            num_per_patient=num_per_patient,
-            num_patients=num_patients,
-            control_combination=control_combination,
-            mdd_combination=mdd_combination,
-            fixed_perms=True,
-            test=True,
-            label_smoothing=label_smoothing
-        )
-    elif control_combination and mdd_combination:
-        dataset = NelsonVirtualPopulation(
-            patient_groups=patient_groups,
-            method=method,
-            normalize_standardize=normalize_standardize,
-            num_per_patient=num_per_patient,
-            num_patients=num_patients,
-            control_combination=control_combination,
-            mdd_combination=mdd_combination,
-            test=True,
-            label_smoothing=label_smoothing
-        )
-    elif pop_number:
-        dataset = NelsonVirtualPopulation(
-            patient_groups=patient_groups,
-            method=method,
-            normalize_standardize=normalize_standardize,
-            num_per_patient=num_per_patient,
-            num_patients=num_patients,
-            pop_number=pop_number,
-            test=True,
-        )
-    else:
-        print('Pop number or combination of patients required')
-        return
-    # Time points we need the solver to output
-    t_eval = dataset[0][0][:,0].contiguous()
-    loader = DataLoader(dataset, batch_size=len(dataset))
-
-    # DataFrame to track performance (with a row for each network state at
-    #  multiples of 100 iterations)
-    performance_df = pd.DataFrame(
-        columns=(
-            'Iterations',
-            'Success',
-            'Prediction',
-            'Error',
-            'Cross Entropy Loss',
-            'Success %'
-        )
-    )
-
-    for itr in range(1,max_itr+1):
-        if control_combination and mdd_combination:
-            index = control_combination+mdd_combination
-        else:
-            index = list(range(len(dataset[:,...])))
-            index = index+index
-
-        tmp_index = []
-        for i, entry in enumerate(index):
-            if i < 5:
-                t = 'Control ' + str(entry)
-            else:
-                t = patient_groups[1] + ' ' + str(entry)
-            tmp_index.append(t)
-        index = tuple(tmp_index)
-        # Pandas Series to allow us to insert the number of iterations for each
-        #  group of predicitons only in the first row of the group
-        iterations = pd.Series((itr*100,), index=(index[0],))
-
-        model = NeuralCDE(
-            input_channels, hdim, output_channels, t_interval=t_eval,
-            device=DEVICE, dropout=DROPOUT
-        ).double()
-        try:
-            if not cort_only:
-                state_dict = torch.load(
-                    os.path.join(state_dir, f'NN_state_2HL_128nodes_NCDE_'
-                                 f'{method}Virtual{patient_group}'
-                                 f"{pop_number if not (control_combination and mdd_combination) else ''}_"
-                                 f"{('Control' + str(control_combination) + '_' + str(patient_group) + str(mdd_combination)) if fixed_perms else ''}_"
-                                 f'{num_per_patient}perPatient_'
-                                 f'batchsize{batch_size}_'
-                                 f'{itr*100}ITER_{normalize_standardize}_'
-                                 f'smoothing{label_smoothing}_'
-                                 f'dropout{DROPOUT}.txt'),
-                    map_location=DEVICE
-                )
-            else:
-                state_dict = torch.load(
-                    os.path.join(
-                        state_dir, f'By Diagnosis/'
-                        f'Control {ctrl_num} {control_combination}/'
-                        f'{patient_group} {mdd_num} {mdd_combination}/'
-                        f'NN_state_{HDIM}nodes_NCDE_'
-                        f'{method}{NOISE_MAGNITUDE}Virtual_'
-                        f'{patient_group}_Control{control_combination}_'
-                        f'{patient_group}{mdd_combination}_'
-                        f'{num_per_patient}perPatient_'
-                        f'batchsize{batch_size}_'
-                        f'{itr*100}ITER_{normalize_standardize}_'
-                        f'smoothing{label_smoothing}_'
-                        f'dropout{DROPOUT}.txt'),
-                    map_location=DEVICE
-                )
-        except FileNotFoundError as e:
-            print(f'Caught error: {e}')
-            break
-
-        model.load_state_dict(state_dict)
-
-        for batch in loader:
-            (data, label) = batch
-            if cort_only:
-                data = data[...,:2].to(DEVICE)
-            coeffs = torchcde.\
-                hermite_cubic_coefficients_with_backward_differences(
-                    data, t=t_eval
-                )
-
-            pred_y = model(coeffs).squeeze(-1)
-            pred_y = torch.sigmoid(pred_y)
-
-            loss = binary_cross_entropy_with_logits(pred_y, label)
-            error = torch.abs(label - pred_y)
-
-            # Rounding the predicted y to see if it was successful
-            rounded_y = torch.round(pred_y)
-            success = [not y for y in torch.abs(label - rounded_y)]
-
-            # Create Pandas Series objects so that we can insert these only
-            #  in the last row of each iteration prediction group
-            cross_entropy_loss = pd.Series(
-                (loss.item(),),
-                index=(index[-1],)
-            )
-            success_pct = pd.Series(
-                (sum(success)/len(pred_y),),
-                index=(index[-1],)
-            )
-            tmp_df = pd.DataFrame(
-                data={
-                    'Iterations': iterations,
-                    'Success': success,
-                    'Prediction': pred_y,
-                    'Error': error,
-                    'Cross Entropy Loss': cross_entropy_loss,
-                    'Success %': success_pct
-                }, index=index
-            )
-
-            # Add the performance metrics to the DataFrame as a new row
-            performance_df = pd.concat(
-                (
-                    performance_df,
-                    tmp_df
-                ),
-            )
-
-    else:
-        if not cort_only:
-            with pd.ExcelWriter(
-                f'Classification Results/Augmented Data/NCDE_{method}Virtual'
-                f'{patient_group}{pop_number if not mdd_combination else mdd_combination}'
-                f"vsControl{'' if not control_combination else control_combination}"
-                f'_classification_{num_per_patient}perPatient_batchsize{batch_size}_'
-                f'{normalize_standardize}_smoothing{label_smoothing}.xlsx'
-            ) as writer:
-                performance_df.to_excel(writer)
-        else:
-            with pd.ExcelWriter(
-                f'Classification Results/Augmented Data/CORT ONLY VPOP Classification/'
-                f'By Diagnosis/'
-                f'Control {ctrl_num} {control_combination}/'
-                f'{patient_group} {mdd_num} {mdd_combination}/'
-                f'NCDE_{method}{NOISE_MAGNITUDE}'
-                f"Control{control_combination}"
-                f'vsMDD{mdd_combination}'
-                f'_classification_'
-                f'{num_per_patient}perPatient_batchsize{batch_size}_'
-                f'{normalize_standardize}_smoothing{label_smoothing}.xlsx'
-            ) as writer:
-                performance_df.to_excel(writer)
-
-def test_full_vpop(method, noise_magnitude, num_per_patient, batch_size,
-         normalize_standardize, input_channels, hdim,
-         output_channels, max_itr, control_combination, control_num,
-         mdd_combination, mdd_num, label_smoothing=0,
-         state_dir='Network States (Full VPOP Training)', by_lab=False):
-    class_state_dir = "By Lab" if by_lab else "By Diagnosis"
-    ctrl_state_dir = f'Control {control_num} {control_combination}'
-    mdd_state_dir = f'MDD {mdd_num} {mdd_combination}'
-    if not by_lab:
-        dataset = FullVirtualPopulation(
-            method=method,
-            noise_magnitude=noise_magnitude,
-            normalize_standardize=normalize_standardize,
-            num_per_patient=num_per_patient,
-            control_combination=control_combination,
-            mdd_combination=mdd_combination,
-            test=True,
-            label_smoothing=label_smoothing
-        )
-    else:
-        dataset = FullVirtualPopulation_ByLab(
-            method=method,
-            noise_magnitude=noise_magnitude,
-            normalize_standardize=normalize_standardize,
-            num_per_patient=num_per_patient,
-            nelson_combination=control_combination,
-            ableson_combination=mdd_combination,
-            test=True,
-        )
-    loader = DataLoader(dataset, batch_size=len(dataset))
-
-    # DataFrame to track performance (with a row for each network state at
-    #  multiples of 100 iterations)
-    performance_df = pd.DataFrame(
-        columns=(
-            'Iterations',
-            'Success',
-            'Prediction',
-            'Error',
-            'Cross Entropy Loss',
-            'Success %'
-        )
-    )
-
-    for itr in range(1,max_itr+1):
-        index = control_combination+mdd_combination
-        tmp_index = []
-        for i, entry in enumerate(index):
-            if i < 5:
-                t = 'Control ' + str(entry)
-            else:
-                t = 'MDD ' + str(entry)
-            tmp_index.append(t)
-        index = tuple(tmp_index)
-        # Pandas Series to allow us to insert the number of iterations for each
-        #  group of predicitons only in the first row of the group
-        iterations = pd.Series((itr*100,), index=(index[0],))
-
-        model = NeuralCDE(
-            input_channels, hdim, output_channels,
-            device=DEVICE, dropout=DROPOUT
-        ).double()
-        try:
-            state_dict = torch.load(
-                os.path.join(state_dir, class_state_dir, ctrl_state_dir,
-                             mdd_state_dir,
-                             f'NN_state_{hdim}nodes_NCDE_'
-                             f'{method}{noise_magnitude}'
-                             f'Virtual_'
-                             f"{('Control' + str(control_combination) + '_MDD' + str(mdd_combination))}_"
-                             f'{num_per_patient}perPatient_'
-                             f'batchsize{batch_size}_'
-                             f'{itr*100}ITER_{normalize_standardize}_'
-                             f'smoothing{label_smoothing}_'
-                             f'dropout{DROPOUT}{"_byLab" if by_lab else ""}'
-                             '.txt'),
-                map_location=DEVICE
-            )
-        except FileNotFoundError as e:
-            print(f'Caught error: {e}')
-            break
-
-        model.load_state_dict(state_dict)
-
-        for batch in loader:
-            (data, label) = batch
-            coeffs = torchcde.\
-                hermite_cubic_coefficients_with_backward_differences(
-                    data
-                )
-
-            pred_y = model(coeffs).squeeze(-1)
-            pred_y = torch.sigmoid(pred_y)
-
-            loss = binary_cross_entropy_with_logits(pred_y, label)
-            error = torch.abs(label - pred_y)
-
-            # Rounding the predicted y to see if it was successful
-            rounded_y = torch.round(pred_y)
-            success = [not y for y in torch.abs(label - rounded_y)]
-
-            # Create Pandas Series objects so that we can insert these only
-            #  in the last row of each iteration prediction group
-            cross_entropy_loss = pd.Series(
-                (loss.item(),),
-                index=(index[-1],)
-            )
-            success_pct = pd.Series(
-                (sum(success)/len(pred_y),),
-                index=(index[-1],)
-            )
-            tmp_df = pd.DataFrame(
-                data={
-                    'Iterations': iterations,
-                    'Success': success,
-                    'Prediction': pred_y,
-                    'Error': error,
-                    'Cross Entropy Loss': cross_entropy_loss,
-                    'Success %': success_pct
-                }, index=index
-            )
-
-            # Add the performance metrics to the DataFrame as a new row
-            performance_df = pd.concat(
-                (
-                    performance_df,
-                    tmp_df
-                ),
-            )
-
-    else:
-        with pd.ExcelWriter(
-            f'Classification Results/Augmented Data/Full VPOP Classification/'
-            f'{"By Lab" if by_lab else "By Diagnosis"}/'
-            f'Control {ctrl_num} {control_combination}/'
-            f'MDD {mdd_num} {mdd_combination}/'
-            f'NCDE_{method}{noise_magnitude}'
-            f"Control{control_combination}"
-            f'vsMDD{mdd_combination}'
-            f'_classification{"byLab" if by_lab else ""}_'
-            f'{num_per_patient}perPatient_batchsize{batch_size}_'
-            f'{normalize_standardize}_smoothing{label_smoothing}.xlsx'
-        ) as writer:
-            performance_df.to_excel(writer)
-
-
-def run_multiple_tests(patient_groups, pop_numbers, max_itr):
-    with torch.no_grad():
-        for groups in patient_groups:
-            for pop_number in pop_numbers:
-                test(
-                    method='Uniform',
-                    patient_groups=groups,
-                    pop_number=pop_number,
-                    num_per_patient=100,
-                    batch_size=100,
-                    normalize_standardize='Standardize',
-                    num_patients=10,
-                    input_channels=3,
-                    hdim=32,
-                    output_channels=1,
-                    max_itr=max_itr,
-                    label_smoothing=0,
-                    state_dir='Network States (VPOP Training)/Uniform - 100 per Patient - 100 Batchsize - Standardized Data - 0 Smoothing - 0.2 Dropout - Fixed Permutations'
-                )
-
-
-def run_fixed_perms(patient_groups, max_itr, perms, cort_only=False):
-    with torch.no_grad():
-        for groups in patient_groups:
-            for ctrl_num in range(3):
-                for mdd_num in range(3):
-                    control_combination = tuple(perms[0][ctrl_num*5:(ctrl_num+1)*5])
-                    if groups[1] == 'Atypical':
-                        mdd_combination = tuple(perms[1][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(perms[1]) else len(perms[1])])
-                    elif groups[1] == 'Melancholic':
-                        mdd_combination = tuple(perms[2][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(perms[2]) else len(perms[2])])
-                    elif groups[1] == 'Neither':
-                        mdd_combination = tuple(perms[3][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(perms[3]) else len(perms[3])])
-                    else:
-                        return
-                    test(
-                        method='Uniform',
-                        patient_groups=groups,
-                        num_per_patient=NUM_PER_PATIENT,
-                        batch_size=BATCH_SIZE,
-                        normalize_standardize=NORMALIZE_STANDARDIZE,
-                        num_patients=NUM_PATIENTS,
-                        input_channels=3 if not cort_only else 2,
-                        hdim=HDIM,
-                        output_channels=OUTPUT_CHANNELS,
-                        max_itr=max_itr,
-                        label_smoothing=LABEL_SMOOTHING,
-                        ctrl_num=ctrl_num,
-                        control_combination=control_combination,
-                        mdd_num=mdd_num,
-                        mdd_combination=mdd_combination,
-                        fixed_perms=True,
-                        state_dir=f'Network States ({"CORT ONLY " if cort_only else ""}VPOP Training)',
-                        cort_only=False if not cort_only else True,
-                    )
-
-
-if __name__ == "__main__":
-    # TRAIN WITH COMBINATIONS OF PATIENTS (which we record the patients
-    #  left out for testing)
-    # for PATIENT_GROUPS in [['Control', 'Atypical'], ['Control', 'Melancholic'],
-    #                        ['Control', 'Neither']]:
-    #     PATIENT_GROUP = PATIENT_GROUPS[1]
-    #     main(use_combinations=True)
-
-    # TRAIN WITH GROUP OF 3 POPULATIONS WHERE EACH PATIENT IS LEFT OUT IN ONE
-    #  GROUP
-    # PATIENT_GROUPS = ['Control', 'Atypical']
-    # PATIENT_GROUP = PATIENT_GROUPS[1]
-    # perms = [
-    #     # Control
-    #     [13, 11,  8, 14,  6,  2, 12, 10,  5,  1,  0,  9,  3,  7,  4],
-    #     # Atypical
-    #     [ 0,  7, 12,  8, 11,  2,  6,  9,  3,  5,  4,  1, 13, 10]
-    # ]
-    # main_given_perms(perms)
-
-    # TRAINING WITH FIXED COMBINATIONS OF TEST PATIENTS (NO ACTH, CORT ONLY)
-    PATIENT_GROUPS = ['Control', 'Atypical']
-    PATIENT_GROUP = PATIENT_GROUPS[1]
-    permutations = [
+PERMUTATIONS = {
+    'nelsononly': [
         # Control
         [13, 11,  8, 14,  6,  2, 12, 10,  5,  1,  0,  9,  3,  7,  4],
         # Atypical
         [ 0,  7, 12,  8, 11,  2,  6,  9,  3,  5,  4,  1, 13, 10],
         # Melancholic
-        # [10, 13,  4,  2,  3, 12, 14,  6,  8,  9,  5,  7,  0, 11,  1],
+        [10, 13,  4,  2,  3, 12, 14,  6,  8,  9,  5,  7,  0, 11,  1],
         # Neither
-        # [ 5, 12,  7, 13, 11,  9,  4,  1,  0,  2,  3, 10,  6,  8]
+        [ 5, 12,  7, 13, 11,  9,  4,  1,  0,  2,  3, 10,  6,  8]
+    ],
+    'fullvpop': [
+        # Control
+        [30, 11, 3, 38, 29, 35, 1, 31, 14, 19, 39, 17, 23, 27, 8, 16, 22, 47,
+         15, 7, 26, 33, 36, 49, 2, 37, 4, 45, 48, 20, 12, 18, 34, 42, 21, 46,
+         28, 13, 50, 51, 25, 44, 40, 41, 43, 0, 6, 9, 24, 32, 10, 5],
+        # MDD
+        [41, 8, 15, 16, 33, 43, 3, 19, 7, 1, 11, 12, 53, 29, 55, 37, 24, 6, 54,
+         21, 27, 47, 13, 25, 5, 0, 30, 46, 17, 23, 36, 10, 39, 14, 18, 35, 22,
+         50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
+         2]
+    ],
+    'fullvpopbylab': [
+        # Nelson
+        [22, 10, 50, 39, 48, 40, 15,  6, 37, 25, 34,  0, 26, 12, 41, 24, 30, 57,
+         49, 53, 46, 56,  4, 38,  5, 43, 19, 11, 17, 31, 29, 20, 35,  8, 52, 21,
+         13, 18, 32, 54, 47, 28, 36, 14,  1, 45,  9, 44,  3,  2, 16, 27, 42, 51,
+         33, 23, 55,  7],
+        # Ableson
+        [8, 45,  1,  2, 24,  7, 32, 40, 15, 34, 26, 13, 27, 25, 16, 18, 29, 14,
+         48, 38, 36, 30, 39, 35, 43, 20, 47,  6, 28,  3, 33, 49, 46, 37, 41,  0,
+         12, 11, 17, 44,  9, 23, 10,  4, 42, 19, 31, 22,  5, 21]
     ]
-    main_cort_only(permutations)
+}
 
-    # TRAINING WITH FIXED COMBINATIONS ON POPULATION OF BOTH NELSON AND ABLESON
-    # permutations = [
-    #     # Control
-    #     [30, 11, 3, 38, 29, 35, 1, 31, 14, 19, 39, 17, 23, 27, 8, 16, 22, 47,
-    #      15, 7, 26, 33, 36, 49, 2, 37, 4, 45, 48, 20, 12, 18, 34, 42, 21, 46,
-    #      28, 13, 50, 51, 25, 44, 40, 41, 43, 0, 6, 9, 24, 32, 10, 5],
-    #     # MDD
-    #     [41, 8, 15, 16, 33, 43, 3, 19, 7, 1, 11, 12, 53, 29, 55, 37, 24, 6, 54,
-    #      21, 27, 47, 13, 25, 5, 0, 30, 46, 17, 23, 36, 10, 39, 14, 18, 35, 22,
-    #      50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
-    #      2]
-    # ]
-    # main_full_vpop(permutations, by_lab=False)
 
-    # TRAINING WITH FIXED COMBINATIONS ON POPULATION OF BOTH NELSON AND ABLESON
-    #  WITH LABELING BY LAB (NELSON=0, ABLESON=1)
-    # permutations = [
-    #     # Nelson
-    #     [22, 10, 50, 39, 48, 40, 15,  6, 37, 25, 34,  0, 26, 12, 41, 24, 30, 57,
-    #     49, 53, 46, 56,  4, 38,  5, 43, 19, 11, 17, 31, 29, 20, 35,  8, 52, 21,
-    #     13, 18, 32, 54, 47, 28, 36, 14,  1, 45,  9, 44,  3,  2, 16, 27, 42, 51,
-    #     33, 23, 55,  7],
-    #     # Ableson
-    #     [8, 45,  1,  2, 24,  7, 32, 40, 15, 34, 26, 13, 27, 25, 16, 18, 29, 14,
-    #     48, 38, 36, 30, 39, 35, 43, 20, 47,  6, 28,  3, 33, 49, 46, 37, 41,  0,
-    #     12, 11, 17, 44,  9, 23, 10,  4, 42, 19, 31, 22,  5, 21]
-    # ]
-    # main_full_vpop(permutations, by_lab=True)
+def set_patient_groups(population):
+    if population == 'nelsononly':
+        return ['Control', sys.argv[3]]
+    elif population == 'fullvpopbylab':
+        return ['Nelson', 'Ableson']
 
-    # TESTING WITH COMBINATIONS OF TEST PATIENTS
-    # with torch.no_grad():
-    #     test(
-    #         method='Uniform',
-    #         patient_groups=['Control', 'Melancholic'],
-    #         num_per_patient=100,
-    #         batch_size=100,
-    #         normalize_standardize='Standardize',
-    #         num_patients=10,
-    #         input_channels=3,
-    #         hdim=32,
-    #         output_channels=1,
-    #         max_itr=3,
-    #         control_combination=(2, 3, 6, 11, 13),
-    #         mdd_combination=(1, 9, 10, 12, 14),
-    #     )
+    return ['Control', 'MDD']
 
-    # TESTING WITH FIXED COMBINATIONS OF TEST PATIENTS
-    # permutations = [
-    #     # Control
-    #     [13, 11,  8, 14,  6,  2, 12, 10,  5,  1,  0,  9,  3,  7,  4],
-    #     # Atypical
-    #     [ 0,  7, 12,  8, 11,  2,  6,  9,  3,  5,  4,  1, 13, 10],
-    #     # Melancholic
-    #     [10, 13,  4,  2,  3, 12, 14,  6,  8,  9,  5,  7,  0, 11,  1],
-    #     # Neither
-    #     [ 5, 12,  7, 13, 11,  9,  4,  1,  0,  2,  3, 10,  6,  8]
-    # ]
-    # run_fixed_perms(
-    #     # patient_groups=[['Control', 'Melancholic'],
-    #     #                 ['Control', 'Neither']],
-    #     patient_groups=[['Control', 'Atypical']],
-    #     max_itr=2, # Pass the max number of 100 iteration steps that were run
-    #     perms=permutations,
-    #     cort_only=True
-    # )
 
-    # TESTING WITH FIXED COMBINATIONS ON POPULATION OF BOTH NELSON AND ABLESON
-    # permutations = [
-    #     # Control
-    #     [30, 11, 3, 38, 29, 35, 1, 31, 14, 19, 39, 17, 23, 27, 8, 16, 22, 47,
-    #      15, 7, 26, 33, 36, 49, 2, 37, 4, 45, 48, 20, 12, 18, 34, 42, 21, 46,
-    #      28, 13, 50, 51, 25, 44, 40, 41, 43, 0, 6, 9, 24, 32, 10, 5],
-    #     # MDD
-    #     [41, 8, 15, 16, 33, 43, 3, 19, 7, 1, 11, 12, 53, 29, 55, 37, 24, 6, 54,
-    #      21, 27, 47, 13, 25, 5, 0, 30, 46, 17, 23, 36, 10, 39, 14, 18, 35, 22,
-    #      50, 45, 28, 38, 9, 49, 26, 34, 4, 32, 48, 44, 31, 42, 52, 20, 51, 40,
-    #      2]
-    # ]
-    # with torch.no_grad():
-    #     ctrl_range = [i for i in range(11)]
-    #     mdd_range = [i for i in range(12)]
-    #     for ctrl_num in ctrl_range:
-    #         for mdd_num in mdd_range:
-    #             ctrl_combo = tuple(permutations[0][ctrl_num*5:(ctrl_num+1)*5])
-    #             mdd_combo = tuple(permutations[1][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(permutations[1]) else len(permutations[1])])
-    #             test_full_vpop(
-    #                 method='Uniform',
-    #                 noise_magnitude=0.05,
-    #                 num_per_patient=100,
-    #                 batch_size=200,
-    #                 normalize_standardize='StandardizeAll',
-    #                 input_channels=3,
-    #                 hdim=32,
-    #                 output_channels=1,
-    #                 max_itr=2,
-    #                 control_combination=ctrl_combo,
-    #                 control_num=ctrl_num,
-    #                 mdd_combination=mdd_combo,
-    #                 mdd_num=mdd_num,
-    #                 by_lab=False
-    #             )
+def usage_hint():
+    raise(ValueError('Try again with the proper CLI arguments.\n\n'
+                     'Usage:\n\tpython classification.py train/test population'
+                     ' (Atypical, Melancholic, or Neither)'
+                     '\n\nWhere train initiates training and test initiates '
+                     'testing,\nand population is one of: "NelsonOnly",'
+                     ' "FullVPOP", "FullVPOPByLab".\nIf using Nelson only '
+                     'populations, include patient subtype after NelsonOnly.'
+                     '\nTo change network '
+                     'training hyperparameters, edit the constant variables '
+                     'at the top of the file.\n'))
 
-    # TESTING WITH FIXED COMBINATIONS ON POPULATION OF BOTH NELSON AND ABLESON
-    #  WITH LABELING BY LAB (NELSON=0, ABLESON=1)
-    # permutations = [
-    #     # Nelson
-    #     [22, 10, 50, 39, 48, 40, 15,  6, 37, 25, 34,  0, 26, 12, 41, 24, 30, 57,
-    #     49, 53, 46, 56,  4, 38,  5, 43, 19, 11, 17, 31, 29, 20, 35,  8, 52, 21,
-    #     13, 18, 32, 54, 47, 28, 36, 14,  1, 45,  9, 44,  3,  2, 16, 27, 42, 51,
-    #     33, 23, 55,  7],
-    #     # Ableson
-    #     [8, 45,  1,  2, 24,  7, 32, 40, 15, 34, 26, 13, 27, 25, 16, 18, 29, 14,
-    #     48, 38, 36, 30, 39, 35, 43, 20, 47,  6, 28,  3, 33, 49, 46, 37, 41,  0,
-    #     12, 11, 17, 44,  9, 23, 10,  4, 42, 19, 31, 22,  5, 21]
-    # ]
-    # with torch.no_grad():
-    #     ctrl_range = [i for i in range(12)]
-    #     mdd_range = [i for i in range(10)]
-    #     for ctrl_num in ctrl_range:
-    #         for mdd_num in mdd_range:
-    #             ctrl_combo = tuple(permutations[0][ctrl_num*5:(ctrl_num+1)*5])
-    #             mdd_combo = tuple(permutations[1][mdd_num*5:((mdd_num+1)*5) if (mdd_num+1)*5 < len(permutations[1]) else len(permutations[1])])
-    #             test_full_vpop(
-    #                 method='Uniform',
-    #                 noise_magnitude=0.05,
-    #                 num_per_patient=100,
-    #                 batch_size=200,
-    #                 normalize_standardize='StandardizeAll',
-    #                 input_channels=3,
-    #                 hdim=32,
-    #                 output_channels=1,
-    #                 max_itr=2,
-    #                 control_combination=ctrl_combo,
-    #                 control_num=ctrl_num,
-    #                 mdd_combination=mdd_combo,
-    #                 mdd_num=mdd_num,
-    #                 by_lab=True
-    #             )
+if __name__ == "__main__":
+    try:
+        pop = sys.argv[2].lower()
+        patient_groups = set_patient_groups(pop)
+        perms = PERMUTATIONS[pop]
+        if pop == 'nelsononly':
+            match patient_groups[1]:
+                case 'Atypical':
+                    perms = [perms[0], perms[1]]
+                case 'Melancholic':
+                    perms = [perms[0], perms[2]]
+                case 'Neither':
+                    perms = [perms[0], perms[3]]
+    except IndexError:
+        usage_hint()
 
-    # TEST WITH RANDOM TEST CASES
-    # for POP_NUMBER in range(1,3):
-    #     for PATIENT_GROUPS in [['Control', 'Atypical'], ['Control', 'Melancholic'],
-    #                            ['Control', 'Neither']]:
-    #         PATIENT_GROUP = PATIENT_GROUPS[1]
-    #         main()
+    if sys.argv[1].lower() == 'train':
+        train(
+            hyperparameters={
+                'INPUT_CHANNELS': INPUT_CHANNELS,
+                'HDIM': HDIM,
+                'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
+                'ITERS': ITERS,
+                'LR': LR,
+                'DECAY': DECAY,
+                'OPT_RESET': OPT_RESET,
+                'ATOL': ATOL,
+                'RTOL': RTOL,
+                'PATIENT_GROUPS': patient_groups,
+                'METHOD': METHOD,
+                'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
+                'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
+                'NUM_PER_PATIENT': NUM_PER_PATIENT,
+                'POP_NUMBER': POP_NUMBER,
+                'BATCH_SIZE': BATCH_SIZE,
+                'LABEL_SMOOTHING': LABEL_SMOOTHING,
+                'DROPOUT': DROPOUT,
+                'CORT_ONLY': CORT_ONLY
+            },
+            virtual=True,
+            permutations=perms,
+            ctrl_range=CTRL_RANGE,
+            mdd_range=MDD_RANGE
+        )
+    elif sys.argv[1].lower() == 'test':
+        test(
+            hyperparameters={
+                'INPUT_CHANNELS': INPUT_CHANNELS,
+                'HDIM': HDIM,
+                'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
+                'ITERS': ITERS,
+                'LR': LR,
+                'DECAY': DECAY,
+                'OPT_RESET': OPT_RESET,
+                'ATOL': ATOL,
+                'RTOL': RTOL,
+                'PATIENT_GROUPS': patient_groups,
+                'METHOD': METHOD,
+                'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
+                'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
+                'NUM_PER_PATIENT': NUM_PER_PATIENT,
+                'POP_NUMBER': POP_NUMBER,
+                'BATCH_SIZE': BATCH_SIZE,
+                'LABEL_SMOOTHING': LABEL_SMOOTHING,
+                'DROPOUT': DROPOUT,
+                'CORT_ONLY': CORT_ONLY,
+                'MAX_ITR': int(ITERS/100)
+            },
+            virtual=True,
+            permutations=perms,
+            ctrl_range=CTRL_RANGE,
+            mdd_range=MDD_RANGE
+        )
+    else:
+        usage_hint()
 
-    # TESTING WITH RANDOM TEST CASES
-    # run_multiple_tests(
-    #     patient_groups=[['Control', 'Atypical'], ['Control', 'Melancholic'],
-    #                     ['Control', 'Neither']],
-    #     pop_numbers=[1,2,3],
-    #     max_itr=3 # Pass the max number of 100 iteration steps that were run
-    # )
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                                 #

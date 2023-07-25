@@ -1,7 +1,7 @@
 # File Name: neural_cde.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 12:43P EDT
-# Last Modified: Thu Jul 20, 2023 | 12:46P EDT
+# Last Modified: Mon Jul 24, 2023 | 01:48P EDT
 
 """Classes for implementation of Neural CDE networks"""
 
@@ -10,7 +10,7 @@ import torch.nn as nn
 import torchcde
 
 class CDEFunc(torch.nn.Module):
-    """CDEs are defined as: z_t = z_0 + \int_{0}^t f_{theta}(z_s) dX_s, where
+    """CDEs are defined as: z_t = z_0 + \\int_{0}^t f_{theta}(z_s) dX_s, where
     f_{theta} is a neural network (and X_s is a rough path controlling the
     diff eq. This class defines f_{theta}"""
     def __init__(self, input_channels, hidden_channels):
@@ -43,9 +43,11 @@ class CDEFunc(torch.nn.Module):
 class NeuralCDE(torch.nn.Module):
     """This class packages the CDEFunc class with the torchcde NCDE solver,
     so that when we call the instance of NeuralCDE it solves the system"""
-    def __init__(self, input_channels, hidden_channels, output_channels,
-                 t_interval=torch.tensor((0,1), dtype=float), device='cpu',
-                 interpolation='cubic', dropout=None):
+    def __init__(self, input_channels: int, hidden_channels: int,
+                 output_channels: int,
+                 t_interval: torch.Tensor=torch.tensor((0,1), dtype=float),
+                 device: torch.device=torch.device('cpu'),
+                 interpolation: str='cubic', dropout: float=0.):
         super().__init__()
 
         self.func = CDEFunc(input_channels, hidden_channels)
@@ -55,8 +57,7 @@ class NeuralCDE(torch.nn.Module):
         # This is essentially augmenting the dimension with a linear map,
         #  something Massaroli et al warned against
         self.initial = torch.nn.Linear(input_channels, hidden_channels)
-        if dropout:
-            self.dropout = torch.nn.Dropout(p=dropout, inplace=True)
+        self.dropout = torch.nn.Dropout(p=dropout, inplace=True)
 
         # self.readout represents l_{theta}^1 in the equation
         #  y ~ l_{theta}^1 (z_T)
@@ -100,18 +101,6 @@ class NeuralCDE(torch.nn.Module):
         pred_y = self.readout(z_T)
 
         return pred_y
-
-class NDEOutputLayer(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, tup):
-        (t_eval, sol) = tup
-        # The result returned from NeuralODE is (11, 1, 2) instead of
-        #  (11, 2, 1) so we swap the last two axes
-        # return torch.swapaxes(sol, 1, 2)
-        return sol
-
 
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#

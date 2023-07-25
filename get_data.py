@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Thu Jul 20, 2023 | 03:31P EDT
+# Last Modified: Mon Jul 24, 2023 | 01:54P EDT
 
 import os
 import torch
@@ -31,10 +31,6 @@ class NonAugmentedDataset(Dataset):
         # self.y indicates whether the patient was diagnosed with MDD
         self.y = torch.zeros((0,))
 
-        # The available groups for Nelson data are Control, Melancholic,
-        #  Atypical and Neither and for Ableson data the are Control and MDD
-        # self.patient_groups = patient_groups
-
         # String to set the data to be Stardardized, Normalized or None (as
         #  it was collected)
         self.normalize_standardize = normalize_standardize
@@ -61,7 +57,7 @@ class NonAugmentedDataset(Dataset):
         y = torch.cat((y, y_tmp), 0)
         return (X, y)
 
-    def norm_data(self, X, length):
+    def norm_data(self, X):
         """This function takes the unmodified data and normalizes or
         standardizes it based on the option selected, then returns it in the
         proper format"""
@@ -110,11 +106,7 @@ class NelsonData(NonAugmentedDataset):
             'Atypical': (14, 1),
             'Neither': (14, 1)
         }
-
         self.patient_groups = patient_groups
-
-        # Check how many patients are in the groups requested
-        length = self.__len__()
 
         # Loop through the patient groups calling self.load_group
         for group in self.patient_groups:
@@ -125,7 +117,7 @@ class NelsonData(NonAugmentedDataset):
                 X=self.X, y=self.y
             )
 
-        self.X = self.norm_data(self.X, length)
+        self.X = self.norm_data(self.X)
 
 
 class AblesonData(NonAugmentedDataset):
@@ -133,29 +125,16 @@ class AblesonData(NonAugmentedDataset):
     virtual patients included"""
     def __init__(self, patient_groups: list[str],
                  normalize_standardize: str,
-                 data_dir: str='Ableson TSST Individual Patient Data'
+                 data_dir: str='Ableson TSST Individual Patient Data '
                                '(Without First 30 Min)'):
         super().__init__(data_dir, normalize_standardize)
-
-        # The available groups for Ableson data are Control and MDD
-        self.patient_groups = patient_groups
 
         # Length and label for each patient group in the dataset
         self.group_info = {
             'Control': (37, 0),
             'MDD': (13, 1)
         }
-
-        length = self.__len__()
-
-        # x contains 11 time points with 3 input channels (time, acth, cort)
-        #  for each time, with 58 total patients
-        self.X = torch.zeros((0, 11, 3))
-        # self.X_standard = torch.zeros((length, 11, 3))
-        # self.X_normal = torch.zeros((length, 11, 3))
-
-        # self.y indicates whether the patient data is MDD
-        self.y = torch.zeros((0,))
+        self.patient_groups = patient_groups
 
         # Loop through the patient groups calling self.load_group
         for group in self.patient_groups:
@@ -165,7 +144,7 @@ class AblesonData(NonAugmentedDataset):
                 label=self.group_info[group][1],
                 X=self.X, y=self.y
             )
-        self.X = self.norm_data(self.X, length)
+        self.X = self.norm_data(self.X)
 
 
 def normalize_time_series(series_tensor):
