@@ -1,7 +1,7 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Tue Jul 25, 2023 | 11:27P EDT
+# Last Modified: Tue Jul 25, 2023 | 11:51P EDT
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 from neural_cde import NeuralCDE
+from get_data import NelsonData, AblesonData
 from get_augmented_data import (FullVirtualPopulation,
                                 FullVirtualPopulation_ByLab,
                                 NelsonVirtualPopulation)
@@ -54,7 +55,8 @@ DEVICE:torch.device = torch.device('cpu')
 
 
 def test(hyperparameters: dict, virtual: bool=True,
-         permutations: list=[], ctrl_range: list=[], mdd_range: list=[]):
+         permutations: list=[], ctrl_range: list=[], mdd_range: list=[],
+         ableson_pop: bool=False):
     """Run the test procedure given the order of test patients withheld from
     the training datasets"""
 
@@ -69,7 +71,7 @@ def test(hyperparameters: dict, virtual: bool=True,
     # If the user didn't pass lists with the order of test patient
     #  permutations, we only test on one population
     if not permutations:
-        test_single(virtual)
+        test_single(virtual, ableson_pop)
         return
 
     # Create the list of all combinations of Control and MDD (or Nelson and
@@ -105,11 +107,12 @@ def test(hyperparameters: dict, virtual: bool=True,
         with torch.no_grad():
             run_testing(model, loader, info)
 
-def test_single(virtual: bool):
+def test_single(virtual: bool, ableson_pop: bool=False):
     """When we do not have a list of test patient groups, run a test on a
     single test population"""
     loader = load_data(
-        virtual, POP_NUMBER, patient_groups=PATIENT_GROUPS, test=True
+        virtual, POP_NUMBER, patient_groups=PATIENT_GROUPS,
+        ableson_pop=ableson_pop, test=True
     )
 
     model = NeuralCDE(
@@ -119,6 +122,7 @@ def test_single(virtual: bool):
 
     info = {
         'virtual': virtual,
+        'ableson_pop': ableson_pop
     }
     with torch.no_grad():
         run_testing(model, loader, info)
@@ -127,11 +131,15 @@ def test_single(virtual: bool):
 def load_data(virtual: bool=True, pop_number: int=0,
               control_combination: tuple=(),
               mdd_combination: tuple=(), patient_groups: list=[],
-              by_lab: bool=False, test: bool=False):
+              by_lab: bool=False, ableson_pop: bool=False,
+              test: bool=False):
     if not patient_groups:
         patient_groups = PATIENT_GROUPS
     if not virtual:
         dataset = NelsonData(
+            patient_groups=patient_groups,
+            normalize_standardize=NORMALIZE_STANDARDIZE
+        ) if not ableson_pop else AblesonData(
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE
         )

@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Tue Jul 25, 2023 | 10:19P EDT
+# Last Modified: Thu Jul 27, 2023 | 12:14P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -15,7 +15,7 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.utils.data import DataLoader
 
 from neural_cde import NeuralCDE
-from get_data import NelsonData
+from get_data import AblesonData, NelsonData
 from get_augmented_data import (FullVirtualPopulation,
                                 FullVirtualPopulation_ByLab,
                                 NelsonVirtualPopulation)
@@ -54,7 +54,8 @@ DEVICE:torch.device = torch.device('cpu')
 
 
 def train(hyperparameters: dict, virtual: bool=True,
-          permutations: list=[], ctrl_range: list=[], mdd_range: list=[]):
+          permutations: list=[], ctrl_range: list=[], mdd_range: list=[],
+          ableson_pop: bool=False):
     """Main function (called when script is executed directly"""
     # Loop over the constants passed in hyperparameters and set the values to
     #  the corresponding global variables
@@ -67,7 +68,7 @@ def train(hyperparameters: dict, virtual: bool=True,
     # If the user didn't pass lists with the order of test patient
     #  permutations, we only run training on one population
     if not permutations:
-        train_single(virtual)
+        train_single(virtual, ableson_pop)
         return
 
     # Create the list of all combinations of Control and MDD (or Nelson and
@@ -103,9 +104,9 @@ def train(hyperparameters: dict, virtual: bool=True,
         run_training(model, loader, info)
 
 
-def train_single(virtual: bool):
+def train_single(virtual: bool, ableson_pop: bool=False):
     loader = load_data(
-        virtual, POP_NUMBER
+        virtual, POP_NUMBER, ableson_pop=ableson_pop
     )
 
     model = NeuralCDE(
@@ -122,11 +123,14 @@ def train_single(virtual: bool):
 def load_data(virtual: bool=True, pop_number: int=0,
               control_combination: tuple=(),
               mdd_combination: tuple=(), patient_groups: list=[],
-              by_lab: bool=False, test: bool=False):
+              by_lab: bool=False, ableson_pop: bool=False, test: bool=False):
     if not patient_groups:
         patient_groups = PATIENT_GROUPS
     if not virtual:
         dataset = NelsonData(
+            patient_groups=patient_groups,
+            normalize_standardize=NORMALIZE_STANDARDIZE
+        ) if not ableson_pop else AblesonData(
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE
         )
@@ -150,7 +154,8 @@ def load_data(virtual: bool=True, pop_number: int=0,
             mdd_combination=mdd_combination,
             test=test,
             label_smoothing=LABEL_SMOOTHING,
-            noise_magnitude=NOISE_MAGNITUDE
+            noise_magnitude=NOISE_MAGNITUDE,
+            no_test_patients=ableson_pop
         )
     elif by_lab:
         dataset = FullVirtualPopulation_ByLab(

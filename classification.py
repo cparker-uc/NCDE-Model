@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Tue Jul 25, 2023 | 11:30P EDT
+# Last Modified: Thu Jul 27, 2023 | 12:11P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
@@ -20,8 +20,8 @@ RTOL = 1e-6
 
 # Training data selection parameters
 METHOD = 'Uniform'
-NORMALIZE_STANDARDIZE = 'Standardize'
-NOISE_MAGNITUDE = 0.05
+NORMALIZE_STANDARDIZE = 'StandardizeAll'
+NOISE_MAGNITUDE = 0.01
 NUM_PER_PATIENT = 100
 POP_NUMBER = 0
 BATCH_SIZE = 200
@@ -33,6 +33,8 @@ CORT_ONLY = True
 #  if using FullVPOP or 12 for control and 10 for MDD if using FullVPOPByLab
 CTRL_RANGE = list(range(3))
 MDD_RANGE = list(range(3))
+# CTRL_RANGE = [1]
+# MDD_RANGE = [11]
 
 
 import sys
@@ -147,9 +149,10 @@ if __name__ == "__main__":
                 'CORT_ONLY': CORT_ONLY
             },
             virtual=True,
-            permutations=perms,
+            # permutations=perms,
             ctrl_range=CTRL_RANGE,
-            mdd_range=MDD_RANGE
+            mdd_range=MDD_RANGE,
+            ableson_pop=True
         )
     elif sys.argv[1].lower() == 'test':
         test(
@@ -178,7 +181,8 @@ if __name__ == "__main__":
             virtual=True,
             permutations=perms,
             ctrl_range=CTRL_RANGE,
-            mdd_range=MDD_RANGE
+            mdd_range=MDD_RANGE,
+            ableson_pop=False
         )
     else:
         usage_hint()

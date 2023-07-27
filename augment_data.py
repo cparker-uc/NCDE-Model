@@ -1,17 +1,17 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Mon Jul 24, 2023 | 01:56P EDT
+# Last Modified: Thu Jul 27, 2023 | 11:52P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
 
-PATIENT_GROUP = 'Control'
+PATIENT_GROUP = 'Atypical'
 NUM_PER_PATIENT = 100
-NUM_PATIENTS = 10
+NUM_PATIENTS = 14
 NUM_POPS = 5
 METHOD = 'Uniform'
-NOISE_MAGNITUDE = 0.01
+NOISE_MAGNITUDE = 0.1
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
 
 import torch
@@ -279,7 +279,13 @@ def generate_full_combinations_by_lab(lab, test_len):
 
 if __name__ == '__main__':
     # Generate a virtual population based on the parameters given
-    # vpop_and_test = generate_virtual_population(PATIENT_GROUP, NUM_PER_PATIENT, NUM_PATIENTS, METHOD)
+    vpop = generate_virtual_population(PATIENT_GROUP, NUM_PER_PATIENT, (), METHOD)
+    torch.save(
+        vpop,
+        f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
+        f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
+        f'noTestPatients.txt'
+    )
 
     # Save the virtual population and respective training population to files
     # torch.save(vpop_and_test, f'Virtual Populations/{PATIENT_GROUP}_{METHOD}_{NUM_PER_PATIENT}_{NUM_PATIENTS}_{POP_NUMBER}.txt')
@@ -291,8 +297,8 @@ if __name__ == '__main__':
     # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
     #     generate_3combinations()
 
-    for PATIENT_GROUP in ['MDD', 'Control']:
-        generate_full_combinations(5)
+    # for PATIENT_GROUP in ['MDD', 'Control']:
+    #     generate_full_combinations(5)
 
     # x = generate_full_combinations_by_lab('Ableson', 5)
 
