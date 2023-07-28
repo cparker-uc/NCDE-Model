@@ -1,15 +1,17 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Tue Jul 25, 2023 | 11:51P EDT
+# Last Modified: Fri Jul 28, 2023 | 04:08P EDT
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
 
 import os
 import torch
+from torch.serialization import MAP_LOCATION
 import torchcde
 import pandas as pd
+from copy import copy
 
 from torch.utils.data import DataLoader
 from torch.nn.functional import binary_cross_entropy_with_logits
@@ -56,7 +58,7 @@ DEVICE:torch.device = torch.device('cpu')
 
 def test(hyperparameters: dict, virtual: bool=True,
          permutations: list=[], ctrl_range: list=[], mdd_range: list=[],
-         ableson_pop: bool=False):
+         ableson_pop: bool=False, plus_ableson_mdd: bool=False):
     """Run the test procedure given the order of test patients withheld from
     the training datasets"""
 
@@ -90,7 +92,9 @@ def test(hyperparameters: dict, virtual: bool=True,
         loader = load_data(
             control_combination=control_combination,
             mdd_combination=mdd_combination,
-            patient_groups=PATIENT_GROUPS, test=True
+            patient_groups=PATIENT_GROUPS, by_lab=by_lab,
+            plus_ableson_mdd=plus_ableson_mdd,
+            test=True
         )
         model = NeuralCDE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
@@ -132,7 +136,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
               control_combination: tuple=(),
               mdd_combination: tuple=(), patient_groups: list=[],
               by_lab: bool=False, ableson_pop: bool=False,
-              test: bool=False):
+              plus_ableson_mdd: bool=False, test: bool=False):
     if not patient_groups:
         patient_groups = PATIENT_GROUPS
     if not virtual:
@@ -140,7 +144,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE
         ) if not ableson_pop else AblesonData(
-            patient_groups=patient_groups,
+            patient_groups=copy(patient_groups),
             normalize_standardize=NORMALIZE_STANDARDIZE
         )
     elif pop_number:
@@ -153,7 +157,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
             test=test,
             label_smoothing=LABEL_SMOOTHING,
         )
-    elif not patient_groups[1] == 'MDD':
+    elif patient_groups[1] not in ['MDD', 'Ableson']:
         dataset = NelsonVirtualPopulation(
             patient_groups=patient_groups,
             method=METHOD,
@@ -163,7 +167,8 @@ def load_data(virtual: bool=True, pop_number: int=0,
             mdd_combination=mdd_combination,
             test=test,
             label_smoothing=LABEL_SMOOTHING,
-            noise_magnitude=NOISE_MAGNITUDE
+            noise_magnitude=NOISE_MAGNITUDE,
+            plus_ableson_mdd=plus_ableson_mdd
         )
     elif by_lab:
         dataset = FullVirtualPopulation_ByLab(
@@ -190,7 +195,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
             label_smoothing=LABEL_SMOOTHING
         )
     loader = DataLoader(
-        dataset=dataset, batch_size=BATCH_SIZE, shuffle=True
+        dataset=dataset, batch_size=BATCH_SIZE, shuffle=False
     )
     return loader
 
@@ -203,6 +208,7 @@ def run_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     mdd_combination = info.get('mdd_combination')
     by_lab = info.get('by_lab')
     virtual = info.get('virtual', True)
+    ableson_pop = info.get('ableson_pop', False)
 
     # Create the Pandas DataFrame which we will write to an Excel sheet
     performance_df = pd.DataFrame(
@@ -221,16 +227,24 @@ def run_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     #  combinations)
     if control_combination:
         index = control_combination+mdd_combination
+    elif ableson_pop:
+        index = [i for i in range(50)]
     else:
         index = [i for i in range(5)]
         index = index+index
 
     tmp_index = []
     for i, entry in enumerate(index):
-        if i < 5:
-            t = PATIENT_GROUPS[0] + str(entry)
+        if ableson_pop:
+            if i < 37:
+                t = PATIENT_GROUPS[0] + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
         else:
-            t = PATIENT_GROUPS[1] + ' ' + str(entry)
+            if i < 5:
+                t = PATIENT_GROUPS[0] + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
         tmp_index.append(t)
     index = tuple(tmp_index)
 
@@ -258,33 +272,48 @@ def run_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     #  100 to MAX_ITR*100
     for itr in range(1,MAX_ITR+1):
         # Set the filename for the network state_dict
-        state_file = (
-            f'NN_state_{HDIM}nodes_NCDE_'
-            f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
-            f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
-            f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
-            f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
-            f'{NUM_PER_PATIENT}perPatient_'
-            f'batchsize{BATCH_SIZE}_'
-            f'{itr*100}ITER_{NORMALIZE_STANDARDIZE}_'
-            f'smoothing{LABEL_SMOOTHING}_'
-            f'dropout{DROPOUT}'
-            f'{"_byLab" if by_lab else ""}.txt'
-        ) if virtual else (
-            f'NN_state_{HDIM}nodes_NCDE_'
-            f'Control_vs_{PATIENT_GROUPS[1]}_'
-            f'batchsize{BATCH_SIZE}_'
-            f'{itr*100}ITER_{NORMALIZE_STANDARDIZE}_'
-            f'smoothing{LABEL_SMOOTHING}_'
-            f'dropout{DROPOUT}.txt'
-        )
+        if virtual:
+            state_file = (
+                f'NN_state_{HDIM}nodes_NCDE_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
+                f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*100}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}'
+                f'{"_byLab" if by_lab else ""}.txt'
+            )
+        elif ableson_pop:
+            state_file = (
+                f'NN_state_{HDIM}nodes_NCDE_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination)}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination)}_'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*100}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        else:
+            state_file = (
+                f'NN_state_{HDIM}nodes_NCDE_'
+                f'Control_vs_{PATIENT_GROUPS[1]}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*100}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
         state_filepath = os.path.join(directory, state_file)
         # Check that the file exists
         if not os.path.exists(state_filepath):
             raise FileNotFoundError(f'Failed to load file: {state_filepath}')
         # Load the state dictionary from the file and set the model to that
         #  state
-        state_dict = torch.load(state_filepath)
+        state_dict = torch.load(state_filepath, map_location=DEVICE)
         model.load_state_dict(state_dict)
 
         # Pandas Series to allow us to insert the number of iterations for each

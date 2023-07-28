@@ -1,12 +1,12 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Thu Jul 27, 2023 | 12:11P EDT
+# Last Modified: Fri Jul 28, 2023 | 03:47P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 
 # Network architecture parameters
-INPUT_CHANNELS = 2
+INPUT_CHANNELS = 3
 HDIM = 32
 OUTPUT_CHANNELS = 1
 
@@ -21,20 +21,20 @@ RTOL = 1e-6
 # Training data selection parameters
 METHOD = 'Uniform'
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
-NOISE_MAGNITUDE = 0.01
+NOISE_MAGNITUDE = 0.05
 NUM_PER_PATIENT = 100
 POP_NUMBER = 0
 BATCH_SIZE = 200
 LABEL_SMOOTHING = 0
 DROPOUT = 0
-CORT_ONLY = True
+CORT_ONLY = False
 # These variables determine which population groups to train/test using
 #  Should be 3 for both if using NelsonOnly data, 11 for control and 12 for MDD
 #  if using FullVPOP or 12 for control and 10 for MDD if using FullVPOPByLab
-CTRL_RANGE = list(range(3))
-MDD_RANGE = list(range(3))
-# CTRL_RANGE = [1]
-# MDD_RANGE = [11]
+CTRL_RANGE = list(range(12))
+MDD_RANGE = list(range(10))
+# CTRL_RANGE = [0]
+# MDD_RANGE = [1]
 
 
 import sys
@@ -62,6 +62,12 @@ PERMUTATIONS = {
         [10, 13,  4,  2,  3, 12, 14,  6,  8,  9,  5,  7,  0, 11,  1],
         # Neither
         [ 5, 12,  7, 13, 11,  9,  4,  1,  0,  2,  3, 10,  6,  8]
+    ],
+    'plusablesonmdd0and12': [
+        # Control
+        [13, 11,  8, 14,  6,  2, 12, 10,  5,  1,  0,  9,  3,  7,  4],
+        # Atypical
+        [11, 12,  6, 10, 13,  2,  9,  3,  8, 14,  1,  4,  5,  7, 15,  0]
     ],
     'fullvpop': [
         # Control
@@ -93,6 +99,8 @@ def set_patient_groups(population):
         return ['Control', sys.argv[3]]
     elif population == 'fullvpopbylab':
         return ['Nelson', 'Ableson']
+    elif population == 'plusablesonmdd0and12':
+        return ['Control', 'Atypical']
 
     return ['Control', 'MDD']
 
@@ -149,10 +157,11 @@ if __name__ == "__main__":
                 'CORT_ONLY': CORT_ONLY
             },
             virtual=True,
-            # permutations=perms,
+            permutations=perms,
             ctrl_range=CTRL_RANGE,
             mdd_range=MDD_RANGE,
-            ableson_pop=True
+            # ableson_pop=True,
+            # plus_ableson_mdd=True
         )
     elif sys.argv[1].lower() == 'test':
         test(
@@ -182,7 +191,8 @@ if __name__ == "__main__":
             permutations=perms,
             ctrl_range=CTRL_RANGE,
             mdd_range=MDD_RANGE,
-            ableson_pop=False
+            # ableson_pop=True,
+            # plus_ableson_mdd=True
         )
     else:
         usage_hint()

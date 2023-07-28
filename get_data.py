@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Mon Jul 24, 2023 | 01:54P EDT
+# Last Modified: Fri Jul 28, 2023 | 12:06P EDT
 
 import os
 import torch
@@ -129,10 +129,13 @@ class AblesonData(NonAugmentedDataset):
                                '(Without First 30 Min)'):
         super().__init__(data_dir, normalize_standardize)
 
+        # Just for testing MDD patients against Nelson Atypical
+        if 'Atypical' in patient_groups:
+            patient_groups[patient_groups.index('Atypical')] = 'MDD'
         # Length and label for each patient group in the dataset
         self.group_info = {
             'Control': (37, 0),
-            'MDD': (13, 1)
+            'MDD': (13, 1),
         }
         self.patient_groups = patient_groups
 

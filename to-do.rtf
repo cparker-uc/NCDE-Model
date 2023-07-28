@@ -8,9 +8,14 @@
 \f0\fs24 \cf0 Make vector field for NODE Figures (varied ICs vs vector field)\
 \
 Try testing with cortisol only between MDD and Control (and maybe Atypical)\
-Use Nelson Atypical to try selecting MDD patients from Ableson that are most like Atypical patients (using NN trained on Nelson Atypical vs everyone else)\
+\
+Use Nelson Atypical to try selecting MDD patients from Ableson that are most like Atypical patients (using NN trained on Nelson Atypical vs everyone else), figure out why it\'92s performing so poorly\
 \
 Do statistical analysis of the well-classified and poorly-classified data to determine why some are so much better\
 \
+What if I added noise to the time points as well as the concentrations?\
 \
-What if I added noise to the time points as well as the concentrations?}
+Networks to train:\
+- Full VPOP MDD vs Control with CORT only\
+- Nelson Control vs Atypical with StandardizeAll (1%, 5%, 10%)\
+- Nelson Control vs Atypical+Ableson0and12 with StandardizeAll (1%, 10%)}

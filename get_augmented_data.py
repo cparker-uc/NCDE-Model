@@ -1,7 +1,7 @@
 # File Name: get_augmented_data.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 03:19P EDT
-# Last Modified: Thu Jul 27, 2023 | 12:11P EDT
+# Last Modified: Fri Jul 28, 2023 | 12:57P EDT
 
 """Loads the datasets that have been augmented with noise to create virtual
 patients"""
@@ -51,6 +51,7 @@ class BaseVirtualPopulation(Dataset):
             self.pop_number = pop_number
 
         self.no_test_patients = no_test_patients
+        self.plus_ableson_mdd = False
 
     def load_group(self, group: str, label: int,
                    X: torch.Tensor, y: torch.Tensor, test: bool):
@@ -79,9 +80,10 @@ class BaseVirtualPopulation(Dataset):
                 f'Virtual Populations/{group}_'
                 f'{self.method}{self.noise_magnitude if self.noise_magnitude else ""}_'
                 f'{self.normalize_standardize}_{self.num_per_patient}_'
-                f'testPatients{self.combinations[label]}_fixedperms.txt'
+                f'testPatients{self.combinations[label]}_'
+                f'{"fixedperms" if not self.plus_ableson_mdd else "plusAblesonMDD0and12"}.txt'
             )
-        if not vpop_and_train:
+        if not isinstance(vpop_and_train, torch.Tensor):
             X_tmp = vpop
         elif test:
             X_tmp = vpop_and_train[self.num_patients[label]*self.num_per_patient:,...]
@@ -125,7 +127,8 @@ class NelsonVirtualPopulation(BaseVirtualPopulation):
                  num_per_patient, pop_number=0,
                  control_combination=(), mdd_combination=(),
                  test=False, label_smoothing=0.,
-                 noise_magnitude=0., no_test_patients=False):
+                 noise_magnitude=0., no_test_patients=False,
+                 plus_ableson_mdd=False):
         super().__init__(method, normalize_standardize,
                          num_per_patient, control_combination, mdd_combination,
                          test, label_smoothing, noise_magnitude, pop_number,
@@ -160,6 +163,7 @@ class NelsonVirtualPopulation(BaseVirtualPopulation):
             )
 
         for group in self.patient_groups:
+            if group == 'Atypical': self.plus_ableson_mdd = plus_ableson_mdd
             (self.X, self.y) = self.load_group(
                 group, self.group_info[group][1],
                 self.X, self.y, self.test

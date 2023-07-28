@@ -1,17 +1,17 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Thu Jul 27, 2023 | 11:52P EDT
+# Last Modified: Fri Jul 28, 2023 | 12:48P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
 
-PATIENT_GROUP = 'Atypical'
+PATIENT_GROUP = 'Control'
 NUM_PER_PATIENT = 100
 NUM_PATIENTS = 14
 NUM_POPS = 5
 METHOD = 'Uniform'
-NOISE_MAGNITUDE = 0.1
+NOISE_MAGNITUDE = 0.05
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
 
 import torch
@@ -29,6 +29,7 @@ def uniform_noise(input_tensor, noise_magnitude):
         output_tensor[idx] = torch.rand((1,))*noise_range + lower_bound
     return output_tensor
 
+
 def generate_augmented_dataset(input_data, number, method, noise_magnitude=NOISE_MAGNITUDE):
     vpop = torch.zeros((number, 11, 3), dtype=float)
     match method:
@@ -37,6 +38,11 @@ def generate_augmented_dataset(input_data, number, method, noise_magnitude=NOISE
                 vpt[...,0] = input_data[...,0]
                 vpt[...,1] = uniform_noise(input_data[...,1], noise_magnitude)
                 vpt[...,2] = uniform_noise(input_data[...,2], noise_magnitude)
+        case 'Normal':
+            for vpt in vpop:
+                vpt[...,0] = input_data[...,0]
+                vpt[...,1] = torch.normal(input_data[...,1], torch.tensor(noise_magnitude))
+                vpt[...,2] = torch.normal(input_data[...,2], torch.tensor(noise_magnitude))
         case _:
             print("Unsupported augmentation strategy")
             return
@@ -46,6 +52,8 @@ def generate_augmented_dataset(input_data, number, method, noise_magnitude=NOISE
 def generate_virtual_population(patient_group, num_per_patient, test_pop_nums,
                                 method, shuffle=True):
     dataset = NelsonData(patient_groups=[patient_group], normalize_standardize=NORMALIZE_STANDARDIZE)
+    # dataset2 = AblesonData(patient_groups=['MDD'], normalize_standardize=NORMALIZE_STANDARDIZE)
+    # loader = DataLoader(ConcatDataset((dataset[:][0], dataset2[[0,12]][0])), batch_size=1, shuffle=shuffle)
     loader = DataLoader(dataset, batch_size=1, shuffle=shuffle)
     vpop = torch.zeros((0, 11, 3), dtype=float)
     test_pop = torch.zeros((0, 11, 3))
@@ -279,13 +287,17 @@ def generate_full_combinations_by_lab(lab, test_len):
 
 if __name__ == '__main__':
     # Generate a virtual population based on the parameters given
-    vpop = generate_virtual_population(PATIENT_GROUP, NUM_PER_PATIENT, (), METHOD)
-    torch.save(
-        vpop,
-        f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
-        f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
-        f'noTestPatients.txt'
-    )
+    # perm = torch.randperm(16)
+    # perm = [11, 12, 6, 10, 13, 2, 9, 3, 8, 14, 1, 4, 5, 7, 15, 0]
+    # for i in range(4):
+    #     testpat = perm[i*5:(i+1)*5] if i != 3 else perm[i*5:]
+    #     vpop = generate_virtual_population(PATIENT_GROUP, NUM_PER_PATIENT, testpat, METHOD)
+    #     torch.save(
+    #         vpop,
+    #         f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
+    #         f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_testPatients{tuple([int(pat) for pat in testpat])}_'
+    #         f'plusAblesonMDD0and12.txt'
+    #     )
 
     # Save the virtual population and respective training population to files
     # torch.save(vpop_and_test, f'Virtual Populations/{PATIENT_GROUP}_{METHOD}_{NUM_PER_PATIENT}_{NUM_PATIENTS}_{POP_NUMBER}.txt')
@@ -294,8 +306,8 @@ if __name__ == '__main__':
     # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
     #     generate_all_pop_combinations()
 
-    # for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
-    #     generate_3combinations()
+    for PATIENT_GROUP in ['Control', 'Atypical', 'Melancholic', 'Neither']:
+        generate_3combinations()
 
     # for PATIENT_GROUP in ['MDD', 'Control']:
     #     generate_full_combinations(5)

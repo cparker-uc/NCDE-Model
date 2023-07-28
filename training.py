@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Thu Jul 27, 2023 | 12:14P EDT
+# Last Modified: Fri Jul 28, 2023 | 12:57P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -55,7 +55,7 @@ DEVICE:torch.device = torch.device('cpu')
 
 def train(hyperparameters: dict, virtual: bool=True,
           permutations: list=[], ctrl_range: list=[], mdd_range: list=[],
-          ableson_pop: bool=False):
+          ableson_pop: bool=False, plus_ableson_mdd: bool=False):
     """Main function (called when script is executed directly"""
     # Loop over the constants passed in hyperparameters and set the values to
     #  the corresponding global variables
@@ -86,7 +86,8 @@ def train(hyperparameters: dict, virtual: bool=True,
         # Load the dataset for training
         loader = load_data(
             control_combination=control_combination,
-            mdd_combination=mdd_combination
+            mdd_combination=mdd_combination,
+            plus_ableson_mdd=plus_ableson_mdd
         )
         model = NeuralCDE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
@@ -99,7 +100,7 @@ def train(hyperparameters: dict, virtual: bool=True,
             'control_combination': control_combination,
             'mdd_num': mdd_num,
             'mdd_combination': mdd_combination,
-            'by_lab': by_lab
+            'by_lab': by_lab,
         }
         run_training(model, loader, info)
 
@@ -123,7 +124,8 @@ def train_single(virtual: bool, ableson_pop: bool=False):
 def load_data(virtual: bool=True, pop_number: int=0,
               control_combination: tuple=(),
               mdd_combination: tuple=(), patient_groups: list=[],
-              by_lab: bool=False, ableson_pop: bool=False, test: bool=False):
+              by_lab: bool=False, ableson_pop: bool=False,
+              plus_ableson_mdd: bool=False, test: bool=False):
     if not patient_groups:
         patient_groups = PATIENT_GROUPS
     if not virtual:
@@ -155,7 +157,8 @@ def load_data(virtual: bool=True, pop_number: int=0,
             test=test,
             label_smoothing=LABEL_SMOOTHING,
             noise_magnitude=NOISE_MAGNITUDE,
-            no_test_patients=ableson_pop
+            no_test_patients=ableson_pop,
+            plus_ableson_mdd=plus_ableson_mdd,
         )
     elif by_lab:
         dataset = FullVirtualPopulation_ByLab(
