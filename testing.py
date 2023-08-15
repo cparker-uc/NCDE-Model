@@ -1,14 +1,14 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Fri Jul 28, 2023 | 04:08P EDT
+# Last Modified: Mon Aug 14, 2023 | 12:02P EDT
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
 
 import os
+from sre_constants import IN
 import torch
-from torch.serialization import MAP_LOCATION
 import torchcde
 import pandas as pd
 from copy import copy
@@ -20,7 +20,7 @@ from neural_cde import NeuralCDE
 from get_data import NelsonData, AblesonData
 from get_augmented_data import (FullVirtualPopulation,
                                 FullVirtualPopulation_ByLab,
-                                NelsonVirtualPopulation)
+                                NelsonVirtualPopulation, ToyDataset)
 
 # The constants listed here are to be defined in classification.py. The train()
 #  function will iterate through the parameter names passed in the
@@ -51,6 +51,7 @@ LABEL_SMOOTHING: float = 0.
 DROPOUT: float = 0.
 CORT_ONLY: bool = False
 MAX_ITR: int = 1
+T_END: int = 0
 
 # Define the device with which to train networks
 DEVICE:torch.device = torch.device('cpu')
@@ -58,7 +59,8 @@ DEVICE:torch.device = torch.device('cpu')
 
 def test(hyperparameters: dict, virtual: bool=True,
          permutations: list=[], ctrl_range: list=[], mdd_range: list=[],
-         ableson_pop: bool=False, plus_ableson_mdd: bool=False):
+         ableson_pop: bool=False, plus_ableson_mdd: bool=False,
+         toy_data: bool=False):
     """Run the test procedure given the order of test patients withheld from
     the training datasets"""
 
@@ -73,7 +75,7 @@ def test(hyperparameters: dict, virtual: bool=True,
     # If the user didn't pass lists with the order of test patient
     #  permutations, we only test on one population
     if not permutations:
-        test_single(virtual, ableson_pop)
+        test_single(virtual, ableson_pop, toy_data)
         return
 
     # Create the list of all combinations of Control and MDD (or Nelson and
@@ -111,12 +113,12 @@ def test(hyperparameters: dict, virtual: bool=True,
         with torch.no_grad():
             run_testing(model, loader, info)
 
-def test_single(virtual: bool, ableson_pop: bool=False):
+def test_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
     """When we do not have a list of test patient groups, run a test on a
     single test population"""
     loader = load_data(
         virtual, POP_NUMBER, patient_groups=PATIENT_GROUPS,
-        ableson_pop=ableson_pop, test=True
+        ableson_pop=ableson_pop, toy_data=toy_data, test=True
     )
 
     model = NeuralCDE(
@@ -126,7 +128,8 @@ def test_single(virtual: bool, ableson_pop: bool=False):
 
     info = {
         'virtual': virtual,
-        'ableson_pop': ableson_pop
+        'ableson_pop': ableson_pop,
+        'toy_data': toy_data
     }
     with torch.no_grad():
         run_testing(model, loader, info)
@@ -136,7 +139,8 @@ def load_data(virtual: bool=True, pop_number: int=0,
               control_combination: tuple=(),
               mdd_combination: tuple=(), patient_groups: list=[],
               by_lab: bool=False, ableson_pop: bool=False,
-              plus_ableson_mdd: bool=False, test: bool=False):
+              plus_ableson_mdd: bool=False,
+              toy_data: bool=False, test: bool=False):
     if not patient_groups:
         patient_groups = PATIENT_GROUPS
     if not virtual:
@@ -146,6 +150,14 @@ def load_data(virtual: bool=True, pop_number: int=0,
         ) if not ableson_pop else AblesonData(
             patient_groups=copy(patient_groups),
             normalize_standardize=NORMALIZE_STANDARDIZE
+        )
+    elif toy_data:
+        dataset = ToyDataset(
+            test=test,
+            noise_magnitude=NOISE_MAGNITUDE,
+            method=METHOD,
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+            t_end=T_END
         )
     elif pop_number:
         dataset = NelsonVirtualPopulation(
@@ -195,7 +207,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
             label_smoothing=LABEL_SMOOTHING
         )
     loader = DataLoader(
-        dataset=dataset, batch_size=BATCH_SIZE, shuffle=False
+        dataset=dataset, batch_size=2000, shuffle=False
     )
     return loader
 
@@ -209,6 +221,7 @@ def run_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     by_lab = info.get('by_lab')
     virtual = info.get('virtual', True)
     ableson_pop = info.get('ableson_pop', False)
+    toy_data = info.get('toy_data', False)
 
     # Create the Pandas DataFrame which we will write to an Excel sheet
     performance_df = pd.DataFrame(
@@ -229,6 +242,8 @@ def run_testing(model: NeuralCDE, loader: DataLoader, info: dict):
         index = control_combination+mdd_combination
     elif ableson_pop:
         index = [i for i in range(50)]
+    elif toy_data:
+        index = [i for i in range(2000)]
     else:
         index = [i for i in range(5)]
         index = index+index
@@ -237,12 +252,17 @@ def run_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     for i, entry in enumerate(index):
         if ableson_pop:
             if i < 37:
-                t = PATIENT_GROUPS[0] + str(entry)
+                t = PATIENT_GROUPS[0] + ' ' +  str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif toy_data:
+            if i < 1000:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
             else:
                 t = PATIENT_GROUPS[1] + ' ' + str(entry)
         else:
             if i < 5:
-                t = PATIENT_GROUPS[0] + str(entry)
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
             else:
                 t = PATIENT_GROUPS[1] + ' ' + str(entry)
         tmp_index.append(t)
@@ -253,6 +273,11 @@ def run_testing(model: NeuralCDE, loader: DataLoader, info: dict):
         directory = (
             f'Network States/'
             f'Control vs {PATIENT_GROUPS[1]}/'
+        )
+    elif toy_data:
+        directory = (
+            f'Network States/'
+            f'Toy Dataset/'
         )
     elif not POP_NUMBER:
         directory = (
@@ -326,7 +351,9 @@ def run_testing(model: NeuralCDE, loader: DataLoader, info: dict):
             #  labels are loaded into the proper device memory
             (data, label) = batch
             if CORT_ONLY:
-                data = data[...,[0,2]].to(DEVICE)
+                data = data[...,[0,2]]
+            if toy_data and INPUT_CHANNELS == 3:
+                data = data[...,[0,2,3]]
             data = data.to(DEVICE)
             label = label.to(DEVICE)
             coeffs = torchcde.\
@@ -390,6 +417,7 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
     mdd_num = info.get('mdd_num')
     mdd_combination = info.get('mdd_combination')
     by_lab = info.get('by_lab')
+    toy_data = info.get('toy_data', False)
 
     # Set the directory name based on which type of dataset was used for the
     #  training
@@ -397,6 +425,11 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
         directory = (
             f'Classification Results/'
             f'Control vs {PATIENT_GROUPS[1]}/'
+        )
+    elif toy_data:
+        directory = (
+            f'Classification Results/'
+            f'Toy Dataset/'
         )
     elif not POP_NUMBER:
         directory = (

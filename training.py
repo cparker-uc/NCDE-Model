@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Fri Jul 28, 2023 | 12:57P EDT
+# Last Modified: Mon Aug 14, 2023 | 11:11P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -18,7 +18,7 @@ from neural_cde import NeuralCDE
 from get_data import AblesonData, NelsonData
 from get_augmented_data import (FullVirtualPopulation,
                                 FullVirtualPopulation_ByLab,
-                                NelsonVirtualPopulation)
+                                NelsonVirtualPopulation, ToyDataset)
 
 # The constants listed here are to be defined in classification.py. The train()
 #  function will iterate through the parameter names passed in the
@@ -48,14 +48,16 @@ BATCH_SIZE: int = 0
 LABEL_SMOOTHING: float = 0.
 DROPOUT: float = 0.
 CORT_ONLY: bool = False
+T_END: int = 0
 
 # Define the device with which to train networks
-DEVICE:torch.device = torch.device('cpu')
+DEVICE = torch.device('cpu')
 
 
 def train(hyperparameters: dict, virtual: bool=True,
           permutations: list=[], ctrl_range: list=[], mdd_range: list=[],
-          ableson_pop: bool=False, plus_ableson_mdd: bool=False):
+          ableson_pop: bool=False, plus_ableson_mdd: bool=False,
+          toy_data: bool=False):
     """Main function (called when script is executed directly"""
     # Loop over the constants passed in hyperparameters and set the values to
     #  the corresponding global variables
@@ -68,7 +70,7 @@ def train(hyperparameters: dict, virtual: bool=True,
     # If the user didn't pass lists with the order of test patient
     #  permutations, we only run training on one population
     if not permutations:
-        train_single(virtual, ableson_pop)
+        train_single(virtual, ableson_pop, toy_data)
         return
 
     # Create the list of all combinations of Control and MDD (or Nelson and
@@ -86,7 +88,7 @@ def train(hyperparameters: dict, virtual: bool=True,
         # Load the dataset for training
         loader = load_data(
             control_combination=control_combination,
-            mdd_combination=mdd_combination,
+            mdd_combination=mdd_combination, by_lab=by_lab,
             plus_ableson_mdd=plus_ableson_mdd
         )
         model = NeuralCDE(
@@ -105,9 +107,9 @@ def train(hyperparameters: dict, virtual: bool=True,
         run_training(model, loader, info)
 
 
-def train_single(virtual: bool, ableson_pop: bool=False):
+def train_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
     loader = load_data(
-        virtual, POP_NUMBER, ableson_pop=ableson_pop
+        virtual, POP_NUMBER, ableson_pop=ableson_pop, toy_data=toy_data
     )
 
     model = NeuralCDE(
@@ -117,6 +119,7 @@ def train_single(virtual: bool, ableson_pop: bool=False):
 
     info = {
         'virtual': virtual,
+        'toy_data': toy_data
     }
     run_training(model, loader, info)
 
@@ -125,7 +128,8 @@ def load_data(virtual: bool=True, pop_number: int=0,
               control_combination: tuple=(),
               mdd_combination: tuple=(), patient_groups: list=[],
               by_lab: bool=False, ableson_pop: bool=False,
-              plus_ableson_mdd: bool=False, test: bool=False):
+              plus_ableson_mdd: bool=False, test: bool=False,
+              toy_data: bool=False):
     if not patient_groups:
         patient_groups = PATIENT_GROUPS
     if not virtual:
@@ -135,6 +139,14 @@ def load_data(virtual: bool=True, pop_number: int=0,
         ) if not ableson_pop else AblesonData(
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE
+        )
+    elif toy_data:
+        dataset = ToyDataset(
+            test=test,
+            noise_magnitude=NOISE_MAGNITUDE,
+            method=METHOD,
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+            t_end=T_END
         )
     elif pop_number:
         dataset = NelsonVirtualPopulation(
@@ -146,7 +158,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
             test=test,
             label_smoothing=LABEL_SMOOTHING,
         )
-    elif not patient_groups[1] == 'MDD':
+    elif patient_groups[1] not in ['MDD', 'Ableson']:
         dataset = NelsonVirtualPopulation(
             patient_groups=patient_groups,
             method=METHOD,
@@ -195,6 +207,7 @@ def run_training(model: NeuralCDE, loader: DataLoader, info: dict):
     virtual = info.get('virtual')
     control_combination = info.get('control_combination')
     mdd_combination = info.get('mdd_combination')
+    toy_data = info.get('toy_data', False)
 
     # Print which population we are using to train
     if not virtual:
@@ -216,7 +229,7 @@ def run_training(model: NeuralCDE, loader: DataLoader, info: dict):
     loss_over_time = []
 
     for itr in range(1, ITERS+1):
-        training_epoch(itr, loader, model, optimizer, loss_over_time)
+        training_epoch(itr, loader, model, optimizer, loss_over_time, toy_data=toy_data)
 
         # If itr is a multiple of OPT_RESET, re-initialize the optimizer to
         #  reset the learning rate and momentum
@@ -243,7 +256,7 @@ def run_training(model: NeuralCDE, loader: DataLoader, info: dict):
 
 
 def training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
-                   optimizer: optim.AdamW, loss_over_time: list):
+                   optimizer: optim.AdamW, loss_over_time: list, toy_data: bool=False):
 
     for j, (data, labels) in enumerate(loader):
         # Ensure we have assigned the data and labels to the correct
@@ -252,6 +265,8 @@ def training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             # If we are only using CORT, we can discard the middle column as it
             #  contains the ACTH concentrations
             data = data[...,[0,2]]
+        if toy_data and INPUT_CHANNELS == 3:
+            data = data[...,[0,2,3]]
         data = data.to(DEVICE)
         labels = labels.to(DEVICE)
         coeffs = torchcde.\
@@ -298,6 +313,7 @@ def save_network(model: NeuralCDE, optimizer: optim.AdamW, info: dict):
     itr = info.get("itr")
     runtime = info.get("runtime")
     loss_over_time = info.get("loss_over_time")
+    toy_data = info.get('toy_data', False)
 
     # Set the directory name based on which type of dataset was used for the
     #  training
@@ -305,6 +321,11 @@ def save_network(model: NeuralCDE, optimizer: optim.AdamW, info: dict):
         directory = (
             f'Network States/'
             f'Control vs {PATIENT_GROUPS[1]}/'
+        )
+    elif toy_data:
+        directory = (
+            f'Network States/'
+            f'Toy Dataset/'
         )
     elif not POP_NUMBER:
         directory = (

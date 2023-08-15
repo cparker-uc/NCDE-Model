@@ -1,7 +1,7 @@
 # File Name: neural_cde.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 12:43P EDT
-# Last Modified: Mon Jul 24, 2023 | 01:48P EDT
+# Last Modified: Fri Jul 28, 2023 | 05:19P EDT
 
 """Classes for implementation of Neural CDE networks"""
 
@@ -13,14 +13,14 @@ class CDEFunc(torch.nn.Module):
     """CDEs are defined as: z_t = z_0 + \\int_{0}^t f_{theta}(z_s) dX_s, where
     f_{theta} is a neural network (and X_s is a rough path controlling the
     diff eq. This class defines f_{theta}"""
-    def __init__(self, input_channels, hidden_channels):
+    def __init__(self, input_channels, hidden_channels, device):
           super().__init__()
           self.input_channels = input_channels
           self.hidden_channels = hidden_channels
 
           # Define the layers of the NN, with 128 hidden nodes (arbitrary)
-          self.linear1 = torch.nn.Linear(hidden_channels, 128)
-          self.linear2 = torch.nn.Linear(128, hidden_channels*input_channels)
+          self.linear1 = torch.nn.Linear(hidden_channels, 128).to(device)
+          self.linear2 = torch.nn.Linear(128, hidden_channels*input_channels).to(device)
 
     def forward(self, t, z):
           """t is passed as an argument by the solver, but it is unused in most
@@ -50,18 +50,18 @@ class NeuralCDE(torch.nn.Module):
                  interpolation: str='cubic', dropout: float=0.):
         super().__init__()
 
-        self.func = CDEFunc(input_channels, hidden_channels)
+        self.func = CDEFunc(input_channels, hidden_channels, device)
 
         # self.initial represents l_{theta}^2 in the equation
         #  z_0 = l_{theta}^2 (x)
         # This is essentially augmenting the dimension with a linear map,
         #  something Massaroli et al warned against
-        self.initial = torch.nn.Linear(input_channels, hidden_channels)
-        self.dropout = torch.nn.Dropout(p=dropout, inplace=True)
+        self.initial = torch.nn.Linear(input_channels, hidden_channels).to(device)
+        self.dropout = torch.nn.Dropout(p=dropout, inplace=True).to(device)
 
         # self.readout represents l_{theta}^1 in the equation
         #  y ~ l_{theta}^1 (z_T)
-        self.readout = torch.nn.Linear(hidden_channels, output_channels)
+        self.readout = torch.nn.Linear(hidden_channels, output_channels).to(device)
 
         self.interpolation = interpolation
         self.t_interval = t_interval.to(device)

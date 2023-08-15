@@ -1,7 +1,7 @@
 # File Name: get_augmented_data.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 03:19P EDT
-# Last Modified: Fri Jul 28, 2023 | 12:57P EDT
+# Last Modified: Fri Aug 11, 2023 | 10:12P EDT
 
 """Loads the datasets that have been augmented with noise to create virtual
 patients"""
@@ -52,6 +52,7 @@ class BaseVirtualPopulation(Dataset):
 
         self.no_test_patients = no_test_patients
         self.plus_ableson_mdd = False
+        self.toy_data = False
 
     def load_group(self, group: str, label: int,
                    X: torch.Tensor, y: torch.Tensor, test: bool):
@@ -62,7 +63,12 @@ class BaseVirtualPopulation(Dataset):
         # Note that we use label to index self.combinations and
         #  self.num_patients in this function. This is valid because we always
         #  expect the values for Control to appear first in these tuples
-        if not self.combinations and self.no_test_patients:
+        if self.toy_data:
+            vpop_and_train = torch.cat((
+                torch.load(f'Virtual Populations/Toy_{group}_{self.method}{self.noise_magnitude}_{self.normalize_standardize}_{self.num_per_patient}_{self.t_end}hr.txt'),
+                torch.load(f'Virtual Populations/Toy_{group}_{self.method}{self.noise_magnitude}_{self.normalize_standardize}_{self.num_per_patient}_{self.t_end}hr_test.txt')
+            ))
+        elif not self.combinations and self.no_test_patients:
             vpop_and_train = None
             vpop = torch.load(
                 f'Virtual Populations/{group}_{self.method}{self.noise_magnitude}_'
@@ -108,6 +114,8 @@ class BaseVirtualPopulation(Dataset):
             if self.combinations:
                 return np.sum([len(combo) for combo in self.combinations])
 
+            if self.toy_data:
+                return np.sum(self.num_patients)*self.num_per_patient
             # Otherwise, we must be using the NelsonVirtualPopulation with
             #  the old pop_number way of dividing the groups for testing, so
             #  just add the group length minus num_patients for each group
@@ -218,10 +226,35 @@ class FullVirtualPopulation_ByLab(BaseVirtualPopulation):
 
         self.num_patients = (
             self.group_info['Nelson'][0] - len(nelson_combination),
-            self.group_info['Ableson'][1] - len(ableson_combination)
+            self.group_info['Ableson'][0] - len(ableson_combination)
         )
 
         for group in self.patient_groups:
+            (self.X, self.y) = self.load_group(
+                group, self.group_info[group][1],
+                self.X, self.y, test
+            )
+
+
+class ToyDataset(BaseVirtualPopulation):
+    def __init__(self, test, noise_magnitude=0.05, method='Uniform',
+                 num_per_patient=1000, normalize_standardize='None',
+                 t_end=24):
+        super().__init__(method, normalize_standardize, num_per_patient,
+                         noise_magnitude=noise_magnitude, test=test)
+
+        self.group_info = {
+            'Control': (2, 0),
+            'Atypical': (2, 1)
+        }
+
+        self.num_patients = (1, 1)
+
+        self.toy_data = True
+        self.X = torch.zeros(0, 20, 5)
+        self.t_end = t_end
+
+        for group in ['Control', 'Atypical']:
             (self.X, self.y) = self.load_group(
                 group, self.group_info[group][1],
                 self.X, self.y, test

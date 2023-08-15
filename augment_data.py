@@ -1,18 +1,18 @@
 # File Name: augment_data.py
 # Author: Christopher Parker
 # Created: Thu Jun 15, 2023 | 06:08P EDT
-# Last Modified: Fri Jul 28, 2023 | 12:48P EDT
+# Last Modified: Tue Aug 01, 2023 | 11:59P EDT
 
 """This script contains methods for augmenting a given tensor of time-series
 data with various strategies, such as Gaussian noise."""
 
-PATIENT_GROUP = 'Control'
+PATIENT_GROUP = 'Atypical'
 NUM_PER_PATIENT = 100
 NUM_PATIENTS = 14
 NUM_POPS = 5
 METHOD = 'Uniform'
 NOISE_MAGNITUDE = 0.05
-NORMALIZE_STANDARDIZE = 'StandardizeAll'
+NORMALIZE_STANDARDIZE = None
 
 import torch
 import numpy as np
@@ -298,6 +298,14 @@ if __name__ == '__main__':
     #         f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_testPatients{tuple([int(pat) for pat in testpat])}_'
     #         f'plusAblesonMDD0and12.txt'
     #     )
+
+    vpop = generate_virtual_population(PATIENT_GROUP, NUM_PER_PATIENT, [], METHOD)
+    torch.save(
+        vpop,
+        f'Virtual Populations/{PATIENT_GROUP}_{METHOD}{NOISE_MAGNITUDE}_'
+        f'{NORMALIZE_STANDARDIZE}_{NUM_PER_PATIENT}_'
+        f'noTestPatients.txt'
+    )
 
     # Save the virtual population and respective training population to files
     # torch.save(vpop_and_test, f'Virtual Populations/{PATIENT_GROUP}_{METHOD}_{NUM_PER_PATIENT}_{NUM_PATIENTS}_{POP_NUMBER}.txt')
