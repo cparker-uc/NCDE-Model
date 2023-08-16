@@ -1,7 +1,7 @@
 # File Name: toy_dataset.py
 # Author: Christopher Parker
 # Created: Tue Aug 01, 2023 | 10:09P EDT
-# Last Modified: Fri Aug 11, 2023 | 10:34P EDT
+# Last Modified: Tue Aug 15, 2023 | 01:51P EDT
 
 """Creates a toy dataset for use in validation of the NCDE architecture.
 Apologies for the haphazard nature of the code, it was done quickly and
@@ -26,7 +26,7 @@ def func(params, y0):
         dy[3] = K_b*y[2]*(G_tot - y[3]) + V_S2*(y[3]**n1/(K1**n1 + y[3]**n1)) \
             - K_d5*y[3]
         return dy
-    t_eval = torch.linspace(0,24,20)
+    t_eval = torch.linspace(0,2.35,20)
     gflow = odeint(ode_rhs, y0, t_eval)
     gflow = torch.from_numpy(gflow)
     return torch.cat((t_eval.view(20,1), gflow), 1)
@@ -44,12 +44,12 @@ def generate_dataset():
     mdd_gflow = func(mdd_params, [1, 10.833, 1.90, 2])
     # mdd_gflow = torch.from_numpy(mdd_gflow)
 
-    noise = 0.05
-    t_end = 24
+    noise = 0.50
+    t_end = 2.35
     ctrl_vpop = augment_gflow(ctrl_gflow, 1000, 'Uniform', noise)
     mdd_vpop = augment_gflow(mdd_gflow, 1000, 'Uniform', noise)
-    torch.save(ctrl_vpop, f'Virtual Populations/Toy_Control_Uniform{noise}_None_1000_{t_end}hr.txt')
-    torch.save(mdd_vpop, f'Virtual Populations/Toy_Atypical_Uniform{noise}_None_1000_{t_end}hr.txt')
+    torch.save(ctrl_vpop, f'Virtual Populations/Toy_Control_Uniform{noise}_None_1000_{t_end}hr_test.txt')
+    torch.save(mdd_vpop, f'Virtual Populations/Toy_Atypical_Uniform{noise}_None_1000_{t_end}hr_test.txt')
 
 
 def uniform_noise(input_tensor, noise_magnitude):
@@ -97,8 +97,8 @@ def check_pop_stats():
     # full_range = np.zeros(0)
     # q1 = np.zeros(0)
     # q3 = np.zeros(0)
-    noise = 0.10
-    t_end = 24
+    noise = 0.50
+    t_end = 2.35
     pop = ToyDataset(
         test=False,
         method='Uniform',
@@ -285,8 +285,8 @@ def normalize_data():
 
 
 def standardize_data():
-    noise = 0.25
-    t_end = 2.35
+    noise = 0.50
+    t_end = 24
     if t_end == 2.35:
         if noise == 0.05:
             mdd_mean = torch.tensor([5, 1.3265, 16.2799, 32.1144, 2.6987])
@@ -303,6 +303,11 @@ def standardize_data():
             mdd_std = torch.tensor([0.0000, 0.3594, 2.0662, 1.8254, 0.3056])
             ctrl_mean = torch.tensor([1.1750, 1.4960, 8.5365, 8.5272, 2.0536])
             ctrl_std = torch.tensor([0.0000, 0.2159, 1.2354, 1.2310, 0.2970])
+        elif noise == 0.5:
+            mdd_mean = torch.tensor([ 1.1750,  2.4985, 14.3014, 12.5161,  2.1164])
+            mdd_std = torch.tensor([0.0000, 0.7216, 4.1354, 3.5957, 0.6146])
+            ctrl_mean = torch.tensor([1.1750, 1.4961, 8.5441, 8.5455, 2.0581])
+            ctrl_std = torch.tensor([0.0000, 0.4304, 2.4606, 2.4761, 0.5910])
     elif t_end == 10:
         if noise == 0.05:
             mdd_mean = torch.tensor([5, 1.3265, 16.2799, 32.1144, 2.6987])
@@ -335,6 +340,11 @@ def standardize_data():
             mdd_std = torch.tensor([0.0000, 0.1135, 1.6317, 4.0710, 0.4064])
             ctrl_mean = torch.tensor([12.0000,  0.7661,  4.6211, 11.2795,  2.4443])
             ctrl_std = torch.tensor([0.0000, 0.1104, 0.6628, 1.6223, 0.3544])
+        elif noise == 0.5:
+            mdd_mean = torch.tensor([12.0000,  0.7829, 11.2924, 28.1665,  2.8123])
+            mdd_std = torch.tensor([0.0000, 0.2263, 3.2436, 8.1067, 0.8138])
+            ctrl_mean = torch.tensor([12.0000,  0.7671,  4.6319, 11.2290,  2.4448])
+            ctrl_std = torch.tensor([0.0000, 0.2214, 1.3273, 3.2338, 0.7093])
 
     pop = ToyDataset(
         test=False,

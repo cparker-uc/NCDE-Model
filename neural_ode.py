@@ -1,12 +1,12 @@
 # File Name: neural_ode.py
 # Author: Christopher Parker
 # Created: Mon Aug 14, 2023 | 11:02P EDT
-# Last Modified: Mon Aug 14, 2023 | 01:21P EDT
+# Last Modified: Tue Aug 15, 2023 | 03:33P EDT
 
 """Contains the class for running NODE training"""
 
 INPUT_CHANNELS: int = 2
-NOISE_MAGNITUDE: float = 0.10
+NOISE_MAGNITUDE: float = 0.50
 DIRECTORY = (
     f'Network States (NODE)/'
     f'Toy Dataset/'
@@ -53,10 +53,10 @@ class NeuralODE(nn.Module):
 def main():
     dataset = ToyDataset(
         test=False,
-        noise_magnitude=0.10,
+        noise_magnitude=NOISE_MAGNITUDE,
         method='Uniform',
         normalize_standardize='Standardize',
-        t_end=24
+        t_end=2.35
     )
     loader = DataLoader(dataset, batch_size=200, shuffle=True)
     func = NeuralODE().double().to(DEVICE)
@@ -173,7 +173,7 @@ def test():
         noise_magnitude=NOISE_MAGNITUDE,
         method='Uniform',
         normalize_standardize='Standardize',
-        t_end=24
+        t_end=2.35
     )
     loader = DataLoader(dataset, batch_size=2000, shuffle=False)
     func = NeuralODE().double().to(DEVICE)

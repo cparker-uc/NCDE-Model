@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Tue Aug 15, 2023 | 10:43P EDT
+# Last Modified: Tue Aug 15, 2023 | 03:38P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 # Network architecture parameters
@@ -19,9 +19,9 @@ RTOL = 1e-6
 
 # Training data selection parameters
 METHOD = 'Uniform'
-NORMALIZE_STANDARDIZE = 'StandardizeAll'
-NOISE_MAGNITUDE = 0.10
-NUM_PER_PATIENT = 100
+NORMALIZE_STANDARDIZE = 'Standardize'
+NOISE_MAGNITUDE = 0.25
+NUM_PER_PATIENT = 1000
 POP_NUMBER = 0
 BATCH_SIZE = 200
 LABEL_SMOOTHING = 0
@@ -36,7 +36,7 @@ MDD_RANGE = list(range(10))
 # MDD_RANGE = [1]
 
 # End time for use with toy dataset (2.35 hours, 10 hours or 24 hours)
-T_END = 24
+T_END = 2.35
 
 
 import sys
@@ -161,12 +161,12 @@ if __name__ == "__main__":
                 'T_END': T_END
             },
             virtual=True,
-            permutations=perms,
-            ctrl_range=CTRL_RANGE,
-            mdd_range=MDD_RANGE,
+            # permutations=perms,
+            # ctrl_range=CTRL_RANGE,
+            # mdd_range=MDD_RANGE,
             # ableson_pop=True,
             # plus_ableson_mdd=True,
-            # toy_data=True
+            toy_data=True
         )
     elif sys.argv[1].lower() == 'test':
         test(
@@ -194,12 +194,12 @@ if __name__ == "__main__":
                 'T_END': T_END
             },
             virtual=True,
-            permutations=perms,
-            ctrl_range=CTRL_RANGE,
-            mdd_range=MDD_RANGE,
+            # permutations=perms,
+            # ctrl_range=CTRL_RANGE,
+            # mdd_range=MDD_RANGE,
             # ableson_pop=True,
             # plus_ableson_mdd=True,
-            # toy_data=True
+            toy_data=True
         )
     else:
         usage_hint()
