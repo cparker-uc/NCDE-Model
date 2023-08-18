@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Tue Aug 15, 2023 | 03:38P EDT
+# Last Modified: Fri Aug 18, 2023 | 12:58P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 # Network architecture parameters
@@ -19,9 +19,9 @@ RTOL = 1e-6
 
 # Training data selection parameters
 METHOD = 'Uniform'
-NORMALIZE_STANDARDIZE = 'Standardize'
-NOISE_MAGNITUDE = 0.25
-NUM_PER_PATIENT = 1000
+NORMALIZE_STANDARDIZE = 'StandardizeAll'
+NOISE_MAGNITUDE = 0.05
+NUM_PER_PATIENT = 100
 POP_NUMBER = 0
 BATCH_SIZE = 200
 LABEL_SMOOTHING = 0
@@ -30,8 +30,8 @@ CORT_ONLY = False
 # These variables determine which population groups to train/test using
 #  Should be 3 for both if using NelsonOnly data, 11 for control and 12 for MDD
 #  if using FullVPOP or 12 for control and 10 for MDD if using FullVPOPByLab
-CTRL_RANGE = list(range(12))
-MDD_RANGE = list(range(10))
+CTRL_RANGE = list(range(11))
+MDD_RANGE = list(range(12))
 # CTRL_RANGE = [0]
 # MDD_RANGE = [1]
 
@@ -161,12 +161,12 @@ if __name__ == "__main__":
                 'T_END': T_END
             },
             virtual=True,
-            # permutations=perms,
-            # ctrl_range=CTRL_RANGE,
-            # mdd_range=MDD_RANGE,
+            permutations=perms,
+            ctrl_range=CTRL_RANGE,
+            mdd_range=MDD_RANGE,
             # ableson_pop=True,
             # plus_ableson_mdd=True,
-            toy_data=True
+            # toy_data=True
         )
     elif sys.argv[1].lower() == 'test':
         test(
@@ -194,12 +194,12 @@ if __name__ == "__main__":
                 'T_END': T_END
             },
             virtual=True,
-            # permutations=perms,
-            # ctrl_range=CTRL_RANGE,
-            # mdd_range=MDD_RANGE,
+            permutations=perms,
+            ctrl_range=CTRL_RANGE,
+            mdd_range=MDD_RANGE,
             # ableson_pop=True,
             # plus_ableson_mdd=True,
-            toy_data=True
+            # toy_data=True
         )
     else:
         usage_hint()
