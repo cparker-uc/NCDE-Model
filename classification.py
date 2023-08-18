@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Fri Aug 18, 2023 | 12:58P EDT
+# Last Modified: Fri Aug 18, 2023 | 01:21P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 # Network architecture parameters
@@ -126,13 +126,20 @@ if __name__ == "__main__":
         else:
             perms = None
         if pop == 'nelsononly':
-            match patient_groups[1]:
-                case 'Atypical':
-                    perms = [perms[0], perms[1]]
-                case 'Melancholic':
-                    perms = [perms[0], perms[2]]
-                case 'Neither':
-                    perms = [perms[0], perms[3]]
+            # match patient_groups[1]:
+            #     case 'Atypical':
+            #         perms = [perms[0], perms[1]]
+            #     case 'Melancholic':
+            #         perms = [perms[0], perms[2]]
+            #     case 'Neither':
+            #         perms = [perms[0], perms[3]]
+            if patient_groups[1] == "Atypical":
+                perms = [perms[0], perms[1]]
+            elif patient_groups[1] == "Melancholic":
+                perms = [perms[0], perms[2]]
+            elif patient_groups[1] == "Neither":
+                perms = [perms[0], perms[3]]
+
     except IndexError:
         usage_hint()
 
