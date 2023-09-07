@@ -1,12 +1,13 @@
 # File Name: neural_cde.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 12:43P EDT
-# Last Modified: Fri Jul 28, 2023 | 05:19P EDT
+# Last Modified: Wed Sep 06, 2023 | 02:00P EDT
 
 """Classes for implementation of Neural CDE networks"""
 
 import torch
 import torch.nn as nn
+import numpy as np
 import torchcde
 
 class CDEFunc(torch.nn.Module):
@@ -14,30 +15,33 @@ class CDEFunc(torch.nn.Module):
     f_{theta} is a neural network (and X_s is a rough path controlling the
     diff eq. This class defines f_{theta}"""
     def __init__(self, input_channels, hidden_channels, device):
-          super().__init__()
-          self.input_channels = input_channels
-          self.hidden_channels = hidden_channels
+        super().__init__()
+        self.input_channels = input_channels
+        self.hidden_channels = hidden_channels
 
-          # Define the layers of the NN, with 128 hidden nodes (arbitrary)
-          self.linear1 = torch.nn.Linear(hidden_channels, 128).to(device)
-          self.linear2 = torch.nn.Linear(128, hidden_channels*input_channels).to(device)
+        # Define the layers of the NN, with 128 hidden nodes (arbitrary)
+        self.linear1 = torch.nn.Linear(hidden_channels, 128).to(device)
+        self.linear2 = torch.nn.Linear(128, hidden_channels*input_channels).to(device)
+
+        nn.init.trunc_normal_(self.linear1.weight, mean=0, std=np.sqrt(2/(hidden_channels*2)))
+        nn.init.trunc_normal_(self.linear2.weight, mean=0, std=np.sqrt(2/(hidden_channels*2)))
 
     def forward(self, t, z):
-          """t is passed as an argument by the solver, but it is unused in most
-          cases"""
-          z = self.linear1(z)
-          z = z.relu()
-          z = self.linear2(z)
+        """t is passed as an argument by the solver, but it is unused in most
+        cases"""
+        z = self.linear1(z)
+        z = z.relu()
+        z = self.linear2(z)
 
-          # The first author of the NCDE paper (Kidger) suggests that using tanh
-          #  for the final activation leads to better results
-          z = z.tanh()
+        # The first author of the NCDE paper (Kidger) suggests that using tanh
+        #  for the final activation leads to better results
+        z = z.tanh()
 
-          # The output represents a linear map from R^input_channels to
-          #  R^hidden_channels, so it takes the form of a
-          #  (hidden_channels x input_channels) matrix
-          z = z.view(z.size(0), self.hidden_channels, self.input_channels)
-          return z
+        # The output represents a linear map from R^input_channels to
+        #  R^hidden_channels, so it takes the form of a
+        #  (hidden_channels x input_channels) matrix
+        z = z.view(z.size(0), self.hidden_channels, self.input_channels)
+        return z
 
 
 class NeuralCDE(torch.nn.Module):

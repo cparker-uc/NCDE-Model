@@ -1,16 +1,21 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Fri Aug 18, 2023 | 01:21P EDT
+# Last Modified: Wed Sep 06, 2023 | 04:36P EDT
 
 "Working on NCDE classification of augmented Nelson data"
 # Network architecture parameters
-INPUT_CHANNELS = 3
-HDIM = 32
+NETWORK_TYPE = 'ANN' # NCDE, NODE, ANN or RNN
+INPUT_CHANNELS = 22 # Should be 40 for Toy dataset or 22 for others if using ANN or RNN
+HDIM = 128
+# Needs to be 2 for NODE (even though it will be run through readout to combine down to 1)
 OUTPUT_CHANNELS = 1
+# Only necessary for RNN
+N_RECURS = 3
 
 # Training hyperparameters
-ITERS = 200
+ITERS = 20
+SAVE_FREQ = 20
 LR = 1e-3
 DECAY = 1e-6
 OPT_RESET = None
@@ -23,9 +28,9 @@ NORMALIZE_STANDARDIZE = 'StandardizeAll'
 NOISE_MAGNITUDE = 0.05
 NUM_PER_PATIENT = 100
 POP_NUMBER = 0
-BATCH_SIZE = 200
+BATCH_SIZE = 10
 LABEL_SMOOTHING = 0
-DROPOUT = 0
+DROPOUT = 0.5
 CORT_ONLY = False
 # These variables determine which population groups to train/test using
 #  Should be 3 for both if using NelsonOnly data, 11 for control and 12 for MDD
@@ -146,10 +151,13 @@ if __name__ == "__main__":
     if sys.argv[1].lower() == 'train':
         train(
             hyperparameters={
+                'NETWORK_TYPE': NETWORK_TYPE,
                 'INPUT_CHANNELS': INPUT_CHANNELS,
                 'HDIM': HDIM,
                 'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
+                'N_RECURS': N_RECURS,
                 'ITERS': ITERS,
+                'SAVE_FREQ': SAVE_FREQ,
                 'LR': LR,
                 'DECAY': DECAY,
                 'OPT_RESET': OPT_RESET,
@@ -178,10 +186,13 @@ if __name__ == "__main__":
     elif sys.argv[1].lower() == 'test':
         test(
             hyperparameters={
+                'NETWORK_TYPE': NETWORK_TYPE,
                 'INPUT_CHANNELS': INPUT_CHANNELS,
                 'HDIM': HDIM,
                 'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
+                'N_RECURS': N_RECURS,
                 'ITERS': ITERS,
+                'SAVE_FREQ': SAVE_FREQ,
                 'LR': LR,
                 'DECAY': DECAY,
                 'OPT_RESET': OPT_RESET,
@@ -197,7 +208,7 @@ if __name__ == "__main__":
                 'LABEL_SMOOTHING': LABEL_SMOOTHING,
                 'DROPOUT': DROPOUT,
                 'CORT_ONLY': CORT_ONLY,
-                'MAX_ITR': int(ITERS/100),
+                'MAX_ITR': ITERS,
                 'T_END': T_END
             },
             virtual=True,

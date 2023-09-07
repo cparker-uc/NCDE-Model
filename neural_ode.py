@@ -1,7 +1,7 @@
 # File Name: neural_ode.py
 # Author: Christopher Parker
 # Created: Mon Aug 14, 2023 | 11:02P EDT
-# Last Modified: Tue Aug 15, 2023 | 03:33P EDT
+# Last Modified: Wed Sep 06, 2023 | 01:58P EDT
 
 """Contains the class for running NODE training"""
 
@@ -20,6 +20,7 @@ if not os.path.exists(DIRECTORY):
 import time
 import torch
 import torch.nn as nn
+import numpy as np
 import pandas as pd
 from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.utils.data import DataLoader
@@ -29,21 +30,22 @@ from get_augmented_data import ToyDataset
 DEVICE = torch.device('cpu')
 
 class NeuralODE(nn.Module):
-    def __init__(self):
+    def __init__(self, input_channels, hdim, output_channels,
+                 device=torch.device('cpu')):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(2, 11),
+            nn.Linear(input_channels, hdim),
             nn.ReLU(),
-            nn.Linear(11, 11),
+            nn.Linear(hdim, hdim),
             nn.ReLU(),
-            nn.Linear(11, 2)
-        )
+            nn.Linear(hdim, output_channels),
+            nn.ReLU(),
+        ).to(device)
 
         for m in self.net.modules():
             if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, mean=0., std=0.1)
-                nn.init.normal_(m.bias, mean=0., std=0.5)
+                nn.init.normal_(m.bias, mean=0., std=np.sqrt(2/(hdim*2)))
 
     def forward(self, t, y):
         """t is unnecessary, but still passed by the NODE solver"""
@@ -59,7 +61,7 @@ def main():
         t_end=2.35
     )
     loader = DataLoader(dataset, batch_size=200, shuffle=True)
-    func = NeuralODE().double().to(DEVICE)
+    func = NeuralODE(2, 11, 2).double().to(DEVICE)
     readout = nn.Linear(2, 1).double().to(DEVICE)
 
     opt_params = list(func.parameters())
@@ -81,6 +83,9 @@ def main():
             data = data.to(DEVICE)
             labels = labels.to(DEVICE)
 
+            print(f"{y0.shape=}")
+            print(f"{t_eval=}")
+            print(f"{data.shape=}")
             # Zero the gradient from the previous data
             optimizer.zero_grad()
 
@@ -315,9 +320,9 @@ def test():
 
 
 if __name__ == '__main__':
-    with torch.no_grad():
-        test()
-    # main()
+    # with torch.no_grad():
+    #     test()
+    main()
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #                                 MIT License                               #

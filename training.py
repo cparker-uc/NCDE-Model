@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Mon Aug 14, 2023 | 11:11P EDT
+# Last Modified: Wed Sep 06, 2023 | 02:48P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -9,12 +9,18 @@ are used in classification.py"""
 import os
 import time
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import torchcde
+from typing import Any
 from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.utils.data import DataLoader
+from torchdiffeq import odeint_adjoint as odeint
 
 from neural_cde import NeuralCDE
+from neural_ode import NeuralODE
+from ann import ANN
+from rnn import RNN
 from get_data import AblesonData, NelsonData
 from get_augmented_data import (FullVirtualPopulation,
                                 FullVirtualPopulation_ByLab,
@@ -25,12 +31,15 @@ from get_augmented_data import (FullVirtualPopulation,
 #  parameter_dict argument and set values to these global variables for use in
 #  all of the functions in this namespace
 # Network architecture parameters
+NETWORK_TYPE: str = ''
 INPUT_CHANNELS: int = 0
 HDIM: int = 0
 OUTPUT_CHANNELS: int = 0
+N_RECURS: int = 0 # Only for RNN
 
 # Training hyperparameters
 ITERS: int = 0
+SAVE_FREQ: int = 0
 LR: float = 0.
 DECAY: float = 0.
 OPT_RESET: int = 0
@@ -91,11 +100,7 @@ def train(hyperparameters: dict, virtual: bool=True,
             mdd_combination=mdd_combination, by_lab=by_lab,
             plus_ableson_mdd=plus_ableson_mdd
         )
-        model = NeuralCDE(
-            INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
-            device=DEVICE, dropout=DROPOUT
-        ).double()
-
+        model = model_init()
         info = {
             'virtual': virtual,
             'ctrl_num': ctrl_num,
@@ -112,11 +117,7 @@ def train_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
         virtual, POP_NUMBER, ableson_pop=ableson_pop, toy_data=toy_data
     )
 
-    model = NeuralCDE(
-        INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
-        device=DEVICE, dropout=DROPOUT
-    ).double()
-
+    model = model_init()
     info = {
         'virtual': virtual,
         'toy_data': toy_data
@@ -202,6 +203,31 @@ def load_data(virtual: bool=True, pop_number: int=0,
     return loader
 
 
+def model_init():
+    if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
+        return NeuralCDE(
+            INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
+            device=DEVICE, dropout=DROPOUT
+        ).double()
+    elif NETWORK_TYPE == 'NODE':
+        return NeuralODE(
+            INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
+            device=DEVICE
+        ).double()
+    elif NETWORK_TYPE == 'ANN':
+        return ANN(
+            INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
+            device=DEVICE
+        ).double()
+    elif NETWORK_TYPE == 'RNN':
+        return RNN(
+            INPUT_CHANNELS, HDIM, N_RECURS,
+            device=DEVICE,
+        ).double()
+    else:
+        raise ValueError("NETWORK_TYPE must be one of NCDE, NCDE_LBFGS, NODE, ANN or RNN")
+
+
 def run_training(model: NeuralCDE, loader: DataLoader, info: dict):
     """Run the training procedure for the given model and DataLoader"""
     virtual = info.get('virtual')
@@ -228,8 +254,36 @@ def run_training(model: NeuralCDE, loader: DataLoader, info: dict):
 
     loss_over_time = []
 
+    # We need to define the readout layer outside of the loop so that it
+    #  isn't reset each iteration
+    # Only necessary for NODE and RNN
+    readout = None
+    if NETWORK_TYPE == 'NODE':
+        readout = nn.Linear(OUTPUT_CHANNELS, 1).double().to(DEVICE)
+    elif NETWORK_TYPE == 'RNN':
+        readout = nn.Linear(HDIM, 1).double().to(DEVICE)
+
     for itr in range(1, ITERS+1):
-        training_epoch(itr, loader, model, optimizer, loss_over_time, toy_data=toy_data)
+        if NETWORK_TYPE == 'NCDE':
+            ncde_training_epoch(itr, loader, model, optimizer, loss_over_time,
+                                toy_data=toy_data)
+        if NETWORK_TYPE == 'NCDE_LBFGS':
+            optimizer = optim.LBFGS(
+                model.parameters()
+            )
+            ncde_training_epoch_lbfgs(itr, loader, model, optimizer, loss_over_time,
+                                toy_data=toy_data)
+        elif NETWORK_TYPE == 'NODE':
+            node_training_epoch(itr, loader, model, readout,
+                                optimizer, loss_over_time, toy_data=toy_data)
+        elif NETWORK_TYPE == 'ANN':
+            ann_training_epoch(itr, loader, model, optimizer, loss_over_time,
+                               toy_data=toy_data)
+        elif NETWORK_TYPE == 'RNN':
+            rnn_training_epoch(itr, loader, model, readout,
+                               optimizer, loss_over_time, toy_data=toy_data)
+        else:
+            raise ValueError("NETWORK_TYPE must be one of NCDE, NODE, ANN, or RNN")
 
         # If itr is a multiple of OPT_RESET, re-initialize the optimizer to
         #  reset the learning rate and momentum
@@ -240,7 +294,7 @@ def run_training(model: NeuralCDE, loader: DataLoader, info: dict):
                 model.parameters(), lr=LR, weight_decay=DECAY
             )
 
-        if itr % 100 == 0:
+        if NETWORK_TYPE == 'ANN' and itr % SAVE_FREQ == 0:
             runtime = time.time() - start_time
             print(f"Runtime: {runtime:.6f} seconds")
 
@@ -252,10 +306,23 @@ def run_training(model: NeuralCDE, loader: DataLoader, info: dict):
                 'loss_over_time': loss_over_time
             }
             save_info.update(info)
-            save_network(model, optimizer, save_info)
+            save_network(model, readout, optimizer, save_info)
+        elif itr % SAVE_FREQ == 0:
+            runtime = time.time() - start_time
+            print(f"Runtime: {runtime:.6f} seconds")
+
+            # Add the iteration number and runtime to the info dictionary and
+            #  pass to save_network
+            save_info = {
+                'itr': itr,
+                'runtime': runtime,
+                'loss_over_time': loss_over_time
+            }
+            save_info.update(info)
+            save_network(model, readout, optimizer, save_info)
 
 
-def training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
+def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
                    optimizer: optim.AdamW, loss_over_time: list, toy_data: bool=False):
 
     for j, (data, labels) in enumerate(loader):
@@ -277,7 +344,7 @@ def training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         # Zero the gradient from the previous data
         optimizer.zero_grad()
 
-        # Compute the forward direction of the NODE
+        # Compute the forward direction of the NCDE
         pred_y = model(coeffs).squeeze(-1)
 
         # Compute the loss based on the results
@@ -294,13 +361,222 @@ def training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         #  parameters
         optimizer.step()
 
-        # If this is the first iteration, or a multiple of 100, present the
+        # If this is the first iteration, or a multiple of 10, present the
         #  user with a progress report
         if (itr == 1) or (itr % 10 == 0):
             print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
 
 
-def save_network(model: NeuralCDE, optimizer: optim.AdamW, info: dict):
+def ncde_training_epoch_lbfgs(itr: int, loader: DataLoader, model: NeuralCDE,
+                   optimizer: optim.AdamW, loss_over_time: list, toy_data: bool=False):
+
+    for j, (data, labels) in enumerate(loader):
+        # Ensure we have assigned the data and labels to the correct
+        #  processing device
+        if CORT_ONLY:
+            # If we are only using CORT, we can discard the middle column as it
+            #  contains the ACTH concentrations
+            data = data[...,[0,2]]
+        if toy_data and INPUT_CHANNELS == 3:
+            data = data[...,[0,2,3]]
+        data = data.to(DEVICE)
+        labels = labels.to(DEVICE)
+        coeffs = torchcde.\
+            hermite_cubic_coefficients_with_backward_differences(
+                data
+            )
+
+        def closure():
+            # Zero the gradient from the previous data
+            if torch.is_grad_enabled():
+                optimizer.zero_grad()
+
+            # Compute the forward direction of the NCDE
+            pred_y = model(coeffs).squeeze(-1)
+
+            # Compute the loss based on the results
+            output = binary_cross_entropy_with_logits(pred_y, labels)
+
+            # This happens in place, so we don't need to return loss_over_time
+            loss_over_time.append((j, output.item()))
+
+            # Backpropagate through the adjoint of the NODE to compute gradients
+            #  WRT each parameter
+            if output.requires_grad:
+                output.backward()
+
+            return output
+
+        # Use the gradients calculated through backpropagation to adjust the
+        #  parameters
+        optimizer.step(closure)
+
+        # If this is the first iteration, or a multiple of 10, present the
+        #  user with a progress report
+        if (itr == 1) or (itr % 10 == 0):
+            print(f"Iter {itr:04d} Batch {j}: loss = {closure().item():.6f}")
+
+
+def node_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
+                        readout: nn.Linear, optimizer: optim.AdamW,
+                        loss_over_time: list, toy_data: bool=False):
+
+    for j, (data, labels) in enumerate(loader):
+        t_eval = data[0,:,0].view(-1)
+        # Ensure we have assigned the data and labels to the correct
+        #  processing device
+        if CORT_ONLY:
+            # If we are only using CORT, we can discard the middle column as it
+            #  contains the ACTH concentrations
+            data = data[...,2]
+        if toy_data and INPUT_CHANNELS == 2:
+            data = data[...,[2,3]]
+        else:
+            data = data[...,1:]
+        data = data.to(DEVICE)
+        labels = labels.to(DEVICE)
+        y0 = data[:,0,:]
+
+        # Zero the gradient from the previous data
+        optimizer.zero_grad()
+
+        # Compute the forward direction of the NODE
+        pred_y = odeint(
+            model, y0, t_eval
+        )
+        # We need to take the output_channels down to a single output, then
+        #  we only need the last value (so the value after the entire depth of
+        #  the network)
+        # We squeeze to remove the extraneous dimension of the output so that
+        #  it matches the shape of the labels
+        pred_y = readout(pred_y)[-1].squeeze(-1)
+
+        # Compute the loss based on the results
+        output = binary_cross_entropy_with_logits(pred_y, labels)
+
+        # This happens in place, so we don't need to return loss_over_time
+        loss_over_time.append((j, output.item()))
+
+        # Backpropagate through the adjoint of the NODE to compute gradients
+        #  WRT each parameter
+        output.backward()
+
+        # Use the gradients calculated through backpropagation to adjust the
+        #  parameters
+        optimizer.step()
+
+        # If this is the first iteration, or a multiple of 10, present the
+        #  user with a progress report
+        if (itr == 1) or (itr % 10 == 0):
+            print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
+
+
+def ann_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
+                       optimizer: optim.AdamW, loss_over_time: list,
+                       toy_data: bool=False):
+
+    for j, (data, labels) in enumerate(loader):
+        # Check how many patients are in the batch (as it may be less than
+        #  BATCH_SIZE if it's the last batch)
+        batch_size_ = data.size(0)
+        # Ensure we have assigned the data and labels to the correct
+        #  processing device
+        if CORT_ONLY:
+            # If we are only using CORT, we can discard the middle column as it
+            #  contains the ACTH concentrations
+            data = data[...,2]
+        elif toy_data and INPUT_CHANNELS == 2:
+            data = data[...,[2,3]]
+        else:
+            data = data[...,1:]
+        data = data.to(DEVICE)
+        labels = labels.to(DEVICE)
+
+        # Zero the gradient from the previous data
+        optimizer.zero_grad()
+
+        # We pass the data from the entire batch at once, shaped to fit the ANN
+        pred_y = model(
+            data.reshape(batch_size_, INPUT_CHANNELS)
+        )
+        # Remove the extraneous dimension from the output of the network so the
+        #  shape matches the labels
+        pred_y = pred_y.squeeze(-1)
+
+        # Compute the loss based on the results
+        output = binary_cross_entropy_with_logits(pred_y, labels)
+
+        # This happens in place, so we don't need to return loss_over_time
+        loss_over_time.append((j, output.item()))
+
+        # Backpropagate through the adjoint of the NODE to compute gradients
+        #  WRT each parameter
+        output.backward()
+
+        # Use the gradients calculated through backpropagation to adjust the
+        #  parameters
+        optimizer.step()
+
+        # If this is the first iteration, or a multiple of 10, present the
+        #  user with a progress report
+        if (itr == 1) or (itr % 10 == 0):
+            print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
+
+
+def rnn_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
+                       readout: nn.Linear, optimizer: optim.AdamW,
+                       loss_over_time: list, toy_data: bool=False):
+
+    for j, (data, labels) in enumerate(loader):
+        # Check how many patients are in the batch (as it may be less than
+        #  BATCH_SIZE if it's the last batch)
+        batch_size_ = data.size(0)
+        # Ensure we have assigned the data and labels to the correct
+        #  processing device
+        if CORT_ONLY:
+            # If we are only using CORT, we can discard the middle column as it
+            #  contains the ACTH concentrations
+            data = data[...,2]
+        elif toy_data and INPUT_CHANNELS == 2:
+            data = data[...,[2,3]]
+        else:
+            data = data[...,1:]
+        data = data.to(DEVICE)
+        labels = labels.to(DEVICE)
+
+        # Zero the gradient from the previous data
+        optimizer.zero_grad()
+
+        # We pass the data from the entire batch at once, shaped to fit the ANN
+        pred_y = model(
+            data.reshape(batch_size_, INPUT_CHANNELS)
+        )
+        # Remove the extraneous dimension from the output of the network so the
+        #  shape matches the labels
+        pred_y = readout(pred_y).squeeze(-1)
+
+        # Compute the loss based on the results
+        output = binary_cross_entropy_with_logits(pred_y, labels)
+
+        # This happens in place, so we don't need to return loss_over_time
+        loss_over_time.append((j, output.item()))
+
+        # Backpropagate through the adjoint of the NODE to compute gradients
+        #  WRT each parameter
+        output.backward()
+
+        # Use the gradients calculated through backpropagation to adjust the
+        #  parameters
+        optimizer.step()
+
+        # If this is the first iteration, or a multiple of 10, present the
+        #  user with a progress report
+        if (itr == 1) or (itr % 10 == 0):
+            print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
+
+
+def save_network(model: NeuralCDE, readout: type[Any], optimizer: optim.AdamW,
+                 info: dict):
     """Save the network state_dict and the training hyperparameters in the
     relevant directory"""
     # Access the necessary variables from the info dictionary
@@ -347,7 +623,7 @@ def save_network(model: NeuralCDE, optimizer: optim.AdamW, info: dict):
 
     # Set the filename for the network state_dict
     filename = (
-        f'NN_state_{HDIM}nodes_NCDE_'
+        f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
         f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
         f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
         f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
@@ -359,7 +635,7 @@ def save_network(model: NeuralCDE, optimizer: optim.AdamW, info: dict):
         f'dropout{DROPOUT}'
         f'{"_byLab" if by_lab else ""}.txt'
     ) if virtual else (
-        f'NN_state_{HDIM}nodes_NCDE_'
+        f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
         f'Control_vs_{PATIENT_GROUPS[1]}_'
         f'batchsize{BATCH_SIZE}_'
         f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
@@ -369,10 +645,21 @@ def save_network(model: NeuralCDE, optimizer: optim.AdamW, info: dict):
     # Add _setup to the filename before the .txt extension
     setup_filename = "".join([filename[:-4], "_setup", filename[-4:]])
 
+    # Add _readout to the filename before the .txt extension if readout is an
+    #  instance of nn.Linear
+    readout_filename = None
+    if isinstance(readout, nn.Linear):
+        readout_filename = "".join([filename[:-4], '_readout', filename[-4:]])
+
     # Save the network state dictionary
     torch.save(
         model.state_dict(), os.path.join(directory, filename)
     )
+    # If defined, save the readout state dictionary
+    if readout_filename:
+        torch.save(
+            readout.state_dict(), os.path.join(directory, readout_filename)
+        )
 
     # Write the hyperparameters to the setup file
     with open(os.path.join(directory, setup_filename), 'w+') as file:
@@ -381,7 +668,7 @@ def save_network(model: NeuralCDE, optimizer: optim.AdamW, info: dict):
             '{PATIENT_GROUPS} Trained Network:\n\n'
         )
         file.write(
-            'Network Architecture Parameters\n'
+            '{NETWORK_TYPE} Network Architecture Parameters\n'
             f'Input channels={INPUT_CHANNELS}\n'
             f'Hidden channels={HDIM}\n'
             f'Output channels={OUTPUT_CHANNELS}\n\n'

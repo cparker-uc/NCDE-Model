@@ -1,7 +1,7 @@
 # File Name: toy_dataset.py
 # Author: Christopher Parker
 # Created: Tue Aug 01, 2023 | 10:09P EDT
-# Last Modified: Tue Aug 15, 2023 | 01:51P EDT
+# Last Modified: Wed Sep 06, 2023 | 11:14P EDT
 
 """Creates a toy dataset for use in validation of the NCDE architecture.
 Apologies for the haphazard nature of the code, it was done quickly and
@@ -30,6 +30,7 @@ def func(params, y0):
     gflow = odeint(ode_rhs, y0, t_eval)
     gflow = torch.from_numpy(gflow)
     return torch.cat((t_eval.view(20,1), gflow), 1)
+
 
 def generate_dataset():
     """Use a system of ordinary diff eqs to generate time-series data"""
