@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Wed Sep 06, 2023 | 02:48P EDT
+# Last Modified: Fri Sep 08, 2023 | 11:37P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torchcde
 from typing import Any
-from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.nn.functional import binary_cross_entropy_with_logits, mse_loss
 from torch.utils.data import DataLoader
 from torchdiffeq import odeint_adjoint as odeint
 
@@ -36,6 +36,8 @@ INPUT_CHANNELS: int = 0
 HDIM: int = 0
 OUTPUT_CHANNELS: int = 0
 N_RECURS: int = 0 # Only for RNN
+CLASSIFY: bool = True # For use in choosing between classification/prediction
+MECHANISTIC: bool = False
 
 # Training hyperparameters
 ITERS: int = 0
@@ -228,7 +230,8 @@ def model_init():
         raise ValueError("NETWORK_TYPE must be one of NCDE, NCDE_LBFGS, NODE, ANN or RNN")
 
 
-def run_training(model: NeuralCDE, loader: DataLoader, info: dict):
+def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
+                 info: dict):
     """Run the training procedure for the given model and DataLoader"""
     virtual = info.get('virtual')
     control_combination = info.get('control_combination')
@@ -264,26 +267,27 @@ def run_training(model: NeuralCDE, loader: DataLoader, info: dict):
         readout = nn.Linear(HDIM, 1).double().to(DEVICE)
 
     for itr in range(1, ITERS+1):
-        if NETWORK_TYPE == 'NCDE':
-            ncde_training_epoch(itr, loader, model, optimizer, loss_over_time,
-                                toy_data=toy_data)
-        if NETWORK_TYPE == 'NCDE_LBFGS':
-            optimizer = optim.LBFGS(
-                model.parameters()
-            )
-            ncde_training_epoch_lbfgs(itr, loader, model, optimizer, loss_over_time,
-                                toy_data=toy_data)
-        elif NETWORK_TYPE == 'NODE':
-            node_training_epoch(itr, loader, model, readout,
-                                optimizer, loss_over_time, toy_data=toy_data)
-        elif NETWORK_TYPE == 'ANN':
-            ann_training_epoch(itr, loader, model, optimizer, loss_over_time,
-                               toy_data=toy_data)
-        elif NETWORK_TYPE == 'RNN':
-            rnn_training_epoch(itr, loader, model, readout,
-                               optimizer, loss_over_time, toy_data=toy_data)
-        else:
-            raise ValueError("NETWORK_TYPE must be one of NCDE, NODE, ANN, or RNN")
+        match NETWORK_TYPE:
+            case 'NCDE':
+                ncde_training_epoch(itr, loader, model, optimizer, loss_over_time,
+                                    toy_data=toy_data)
+            case 'NCDE_LBFGS':
+                optimizer = optim.LBFGS(
+                    model.parameters()
+                )
+                ncde_training_epoch_lbfgs(itr, loader, model, optimizer, loss_over_time,
+                                    toy_data=toy_data)
+            case 'NODE':
+                node_training_epoch(itr, loader, model, readout,
+                                    optimizer, loss_over_time, toy_data=toy_data)
+            case 'ANN':
+                ann_training_epoch(itr, loader, model, optimizer, loss_over_time,
+                                   toy_data=toy_data)
+            case 'RNN':
+                rnn_training_epoch(itr, loader, model, readout,
+                                   optimizer, loss_over_time, toy_data=toy_data)
+            case _:
+                raise ValueError("NETWORK_TYPE must be one of NCDE, NODE, ANN, or RNN")
 
         # If itr is a multiple of OPT_RESET, re-initialize the optimizer to
         #  reset the learning rate and momentum
@@ -294,20 +298,7 @@ def run_training(model: NeuralCDE, loader: DataLoader, info: dict):
                 model.parameters(), lr=LR, weight_decay=DECAY
             )
 
-        if NETWORK_TYPE == 'ANN' and itr % SAVE_FREQ == 0:
-            runtime = time.time() - start_time
-            print(f"Runtime: {runtime:.6f} seconds")
-
-            # Add the iteration number and runtime to the info dictionary and
-            #  pass to save_network
-            save_info = {
-                'itr': itr,
-                'runtime': runtime,
-                'loss_over_time': loss_over_time
-            }
-            save_info.update(info)
-            save_network(model, readout, optimizer, save_info)
-        elif itr % SAVE_FREQ == 0:
+        if itr % SAVE_FREQ == 0:
             runtime = time.time() - start_time
             print(f"Runtime: {runtime:.6f} seconds")
 
@@ -334,8 +325,8 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             data = data[...,[0,2]]
         if toy_data and INPUT_CHANNELS == 3:
             data = data[...,[0,2,3]]
+        labels = labels.to(DEVICE) if CLASSIFY else data.to(DEVICE)
         data = data.to(DEVICE)
-        labels = labels.to(DEVICE)
         coeffs = torchcde.\
             hermite_cubic_coefficients_with_backward_differences(
                 data
@@ -348,7 +339,7 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         pred_y = model(coeffs).squeeze(-1)
 
         # Compute the loss based on the results
-        output = binary_cross_entropy_with_logits(pred_y, labels)
+        output = prediction_loss(pred_y, labels)
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -368,7 +359,7 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
 
 
 def ncde_training_epoch_lbfgs(itr: int, loader: DataLoader, model: NeuralCDE,
-                   optimizer: optim.AdamW, loss_over_time: list, toy_data: bool=False):
+                   optimizer: optim.AdamW | optim.LBFGS, loss_over_time: list, toy_data: bool=False):
 
     for j, (data, labels) in enumerate(loader):
         # Ensure we have assigned the data and labels to the correct
@@ -379,8 +370,8 @@ def ncde_training_epoch_lbfgs(itr: int, loader: DataLoader, model: NeuralCDE,
             data = data[...,[0,2]]
         if toy_data and INPUT_CHANNELS == 3:
             data = data[...,[0,2,3]]
+        labels = labels.to(DEVICE) if CLASSIFY else data.to(DEVICE)
         data = data.to(DEVICE)
-        labels = labels.to(DEVICE)
         coeffs = torchcde.\
             hermite_cubic_coefficients_with_backward_differences(
                 data
@@ -395,7 +386,7 @@ def ncde_training_epoch_lbfgs(itr: int, loader: DataLoader, model: NeuralCDE,
             pred_y = model(coeffs).squeeze(-1)
 
             # Compute the loss based on the results
-            output = binary_cross_entropy_with_logits(pred_y, labels)
+            output = prediction_loss(pred_y, labels)
 
             # This happens in place, so we don't need to return loss_over_time
             loss_over_time.append((j, output.item()))
@@ -417,7 +408,7 @@ def ncde_training_epoch_lbfgs(itr: int, loader: DataLoader, model: NeuralCDE,
             print(f"Iter {itr:04d} Batch {j}: loss = {closure().item():.6f}")
 
 
-def node_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
+def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
                         readout: nn.Linear, optimizer: optim.AdamW,
                         loss_over_time: list, toy_data: bool=False):
 
@@ -433,8 +424,8 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             data = data[...,[2,3]]
         else:
             data = data[...,1:]
+        labels = labels.to(DEVICE) if CLASSIFY else data.to(DEVICE)
         data = data.to(DEVICE)
-        labels = labels.to(DEVICE)
         y0 = data[:,0,:]
 
         # Zero the gradient from the previous data
@@ -452,7 +443,7 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         pred_y = readout(pred_y)[-1].squeeze(-1)
 
         # Compute the loss based on the results
-        output = binary_cross_entropy_with_logits(pred_y, labels)
+        output = prediction_loss(pred_y, labels)
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -471,7 +462,7 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
 
 
-def ann_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
+def ann_training_epoch(itr: int, loader: DataLoader, model: ANN,
                        optimizer: optim.AdamW, loss_over_time: list,
                        toy_data: bool=False):
 
@@ -489,8 +480,8 @@ def ann_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             data = data[...,[2,3]]
         else:
             data = data[...,1:]
+        labels = labels.to(DEVICE) if CLASSIFY else data.to(DEVICE)
         data = data.to(DEVICE)
-        labels = labels.to(DEVICE)
 
         # Zero the gradient from the previous data
         optimizer.zero_grad()
@@ -504,7 +495,7 @@ def ann_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         pred_y = pred_y.squeeze(-1)
 
         # Compute the loss based on the results
-        output = binary_cross_entropy_with_logits(pred_y, labels)
+        output = prediction_loss(pred_y, labels)
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -523,7 +514,7 @@ def ann_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
 
 
-def rnn_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
+def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
                        readout: nn.Linear, optimizer: optim.AdamW,
                        loss_over_time: list, toy_data: bool=False):
 
@@ -541,8 +532,8 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             data = data[...,[2,3]]
         else:
             data = data[...,1:]
+        labels = labels.to(DEVICE) if CLASSIFY else data.to(DEVICE)
         data = data.to(DEVICE)
-        labels = labels.to(DEVICE)
 
         # Zero the gradient from the previous data
         optimizer.zero_grad()
@@ -556,7 +547,7 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         pred_y = readout(pred_y).squeeze(-1)
 
         # Compute the loss based on the results
-        output = binary_cross_entropy_with_logits(pred_y, labels)
+        output = prediction_loss(pred_y, labels)
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -573,6 +564,17 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         #  user with a progress report
         if (itr == 1) or (itr % 10 == 0):
             print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
+
+
+def prediction_loss(pred_y, labels):
+    """To compute the loss with potential mechanistic components"""
+    if CLASSIFY:
+        return binary_cross_entropy_with_logits(pred_y, labels)
+
+    if MECHANISTIC:
+        pass
+
+    return mse_loss(pred_y, labels)
 
 
 def save_network(model: NeuralCDE, readout: type[Any], optimizer: optim.AdamW,

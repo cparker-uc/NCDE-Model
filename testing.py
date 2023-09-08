@@ -1,13 +1,12 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Wed Sep 06, 2023 | 03:03P EDT
+# Last Modified: Fri Sep 08, 2023 | 10:12P EDT
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
 
 import os
-from sre_constants import IN
 import torch
 import torch.nn as nn
 import torchcde

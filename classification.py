@@ -1,12 +1,16 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Wed Sep 06, 2023 | 04:36P EDT
+# Last Modified: Fri Sep 08, 2023 | 10:07P EDT
 
-"Working on NCDE classification of augmented Nelson data"
+"Root file for classification of augmented Nelson data"
+
 # Network architecture parameters
 NETWORK_TYPE = 'ANN' # NCDE, NODE, ANN or RNN
-INPUT_CHANNELS = 22 # Should be 40 for Toy dataset or 22 for others if using ANN or RNN
+# Should be 40 for Toy dataset or 22 for others if using ANN or RNN
+# If using NCDE, should be the number of vars plus 1, since we include time
+# If using NODE, should just be the number of vars
+INPUT_CHANNELS = 22
 HDIM = 128
 # Needs to be 2 for NODE (even though it will be run through readout to combine down to 1)
 OUTPUT_CHANNELS = 1
@@ -23,6 +27,8 @@ ATOL = 1e-8
 RTOL = 1e-6
 
 # Training data selection parameters
+POP = 'FullVPOP'
+PATIENT_GROUPS = ['Control', 'Atypical'] # Only necessary for POP='NelsonOnly'
 METHOD = 'Uniform'
 NORMALIZE_STANDARDIZE = 'StandardizeAll'
 NOISE_MAGNITUDE = 0.05
@@ -37,8 +43,6 @@ CORT_ONLY = False
 #  if using FullVPOP or 12 for control and 10 for MDD if using FullVPOPByLab
 CTRL_RANGE = list(range(11))
 MDD_RANGE = list(range(12))
-# CTRL_RANGE = [0]
-# MDD_RANGE = [1]
 
 # End time for use with toy dataset (2.35 hours, 10 hours or 24 hours)
 T_END = 2.35
@@ -54,6 +58,9 @@ from testing import test
 
 # Define the device with which to train networks
 DEVICE = torch.device('cpu')
+
+# These are the permutations of test patients selected from each group 
+#  (hard-coded for reproducibility and easy reference)
 
 PERMUTATIONS = {
     'nelsononly': [
@@ -99,7 +106,7 @@ PERMUTATIONS = {
 
 def set_patient_groups(population):
     if population == 'nelsononly':
-        return ['Control', sys.argv[3]]
+        return PATIENT_GROUPS
     elif population == 'fullvpopbylab':
         return ['Nelson', 'Ableson']
     elif population == 'plusablesonmdd0and12':
@@ -123,104 +130,102 @@ def usage_hint():
                      'at the top of the file.\n'))
 
 if __name__ == "__main__":
-    try:
-        pop = sys.argv[2].lower()
-        patient_groups = set_patient_groups(pop)
-        if pop != 'toydata':
-            perms = PERMUTATIONS[pop]
-        else:
-            perms = None
-        if pop == 'nelsononly':
-            # match patient_groups[1]:
-            #     case 'Atypical':
-            #         perms = [perms[0], perms[1]]
-            #     case 'Melancholic':
-            #         perms = [perms[0], perms[2]]
-            #     case 'Neither':
-            #         perms = [perms[0], perms[3]]
-            if patient_groups[1] == "Atypical":
+    patient_groups = set_patient_groups(POP)
+    if POP != 'toydata':
+        perms = PERMUTATIONS[POP.lower()]
+    else:
+        perms = None
+    if POP == 'nelsononly':
+        match patient_groups[1]:
+            case 'Atypical':
                 perms = [perms[0], perms[1]]
-            elif patient_groups[1] == "Melancholic":
+            case 'Melancholic':
                 perms = [perms[0], perms[2]]
-            elif patient_groups[1] == "Neither":
+            case 'Neither':
                 perms = [perms[0], perms[3]]
+        # If not using Python 3.11:
+        # if patient_groups[1] == "Atypical":
+        #     perms = [perms[0], perms[1]]
+        # elif patient_groups[1] == "Melancholic":
+        #     perms = [perms[0], perms[2]]
+        # elif patient_groups[1] == "Neither":
+        #     perms = [perms[0], perms[3]]
 
+    try:
+        if sys.argv[1].lower() == 'train':
+            train(
+                hyperparameters={
+                    'NETWORK_TYPE': NETWORK_TYPE,
+                    'INPUT_CHANNELS': INPUT_CHANNELS,
+                    'HDIM': HDIM,
+                    'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
+                    'N_RECURS': N_RECURS,
+                    'ITERS': ITERS,
+                    'SAVE_FREQ': SAVE_FREQ,
+                    'LR': LR,
+                    'DECAY': DECAY,
+                    'OPT_RESET': OPT_RESET,
+                    'ATOL': ATOL,
+                    'RTOL': RTOL,
+                    'PATIENT_GROUPS': patient_groups,
+                    'METHOD': METHOD,
+                    'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
+                    'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
+                    'NUM_PER_PATIENT': NUM_PER_PATIENT,
+                    'POP_NUMBER': POP_NUMBER,
+                    'BATCH_SIZE': BATCH_SIZE,
+                    'LABEL_SMOOTHING': LABEL_SMOOTHING,
+                    'DROPOUT': DROPOUT,
+                    'CORT_ONLY': CORT_ONLY,
+                    'T_END': T_END
+                },
+                virtual=True,
+                permutations=perms,
+                ctrl_range=CTRL_RANGE,
+                mdd_range=MDD_RANGE,
+                plus_ableson_mdd=True if POP.lower()=='plusablesonmdd0and12' else False,
+                toy_data=True if POP.lower()=='toydata' else False
+            )
+        elif sys.argv[1].lower() == 'test':
+            test(
+                hyperparameters={
+                    'NETWORK_TYPE': NETWORK_TYPE,
+                    'INPUT_CHANNELS': INPUT_CHANNELS,
+                    'HDIM': HDIM,
+                    'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
+                    'N_RECURS': N_RECURS,
+                    'ITERS': ITERS,
+                    'SAVE_FREQ': SAVE_FREQ,
+                    'LR': LR,
+                    'DECAY': DECAY,
+                    'OPT_RESET': OPT_RESET,
+                    'ATOL': ATOL,
+                    'RTOL': RTOL,
+                    'PATIENT_GROUPS': patient_groups,
+                    'METHOD': METHOD,
+                    'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
+                    'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
+                    'NUM_PER_PATIENT': NUM_PER_PATIENT,
+                    'POP_NUMBER': POP_NUMBER,
+                    'BATCH_SIZE': BATCH_SIZE,
+                    'LABEL_SMOOTHING': LABEL_SMOOTHING,
+                    'DROPOUT': DROPOUT,
+                    'CORT_ONLY': CORT_ONLY,
+                    'MAX_ITR': ITERS,
+                    'T_END': T_END
+                },
+                virtual=True,
+                permutations=perms,
+                ctrl_range=CTRL_RANGE,
+                mdd_range=MDD_RANGE,
+                plus_ableson_mdd=True if POP.lower()=='plusablesonmdd0and12' else False,
+                toy_data=True if POP.lower()=='toydata' else False
+            )
+        else:
+            usage_hint()
     except IndexError:
         usage_hint()
 
-    if sys.argv[1].lower() == 'train':
-        train(
-            hyperparameters={
-                'NETWORK_TYPE': NETWORK_TYPE,
-                'INPUT_CHANNELS': INPUT_CHANNELS,
-                'HDIM': HDIM,
-                'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
-                'N_RECURS': N_RECURS,
-                'ITERS': ITERS,
-                'SAVE_FREQ': SAVE_FREQ,
-                'LR': LR,
-                'DECAY': DECAY,
-                'OPT_RESET': OPT_RESET,
-                'ATOL': ATOL,
-                'RTOL': RTOL,
-                'PATIENT_GROUPS': patient_groups,
-                'METHOD': METHOD,
-                'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
-                'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
-                'NUM_PER_PATIENT': NUM_PER_PATIENT,
-                'POP_NUMBER': POP_NUMBER,
-                'BATCH_SIZE': BATCH_SIZE,
-                'LABEL_SMOOTHING': LABEL_SMOOTHING,
-                'DROPOUT': DROPOUT,
-                'CORT_ONLY': CORT_ONLY,
-                'T_END': T_END
-            },
-            virtual=True,
-            permutations=perms,
-            ctrl_range=CTRL_RANGE,
-            mdd_range=MDD_RANGE,
-            # ableson_pop=True,
-            # plus_ableson_mdd=True,
-            # toy_data=True
-        )
-    elif sys.argv[1].lower() == 'test':
-        test(
-            hyperparameters={
-                'NETWORK_TYPE': NETWORK_TYPE,
-                'INPUT_CHANNELS': INPUT_CHANNELS,
-                'HDIM': HDIM,
-                'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
-                'N_RECURS': N_RECURS,
-                'ITERS': ITERS,
-                'SAVE_FREQ': SAVE_FREQ,
-                'LR': LR,
-                'DECAY': DECAY,
-                'OPT_RESET': OPT_RESET,
-                'ATOL': ATOL,
-                'RTOL': RTOL,
-                'PATIENT_GROUPS': patient_groups,
-                'METHOD': METHOD,
-                'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
-                'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
-                'NUM_PER_PATIENT': NUM_PER_PATIENT,
-                'POP_NUMBER': POP_NUMBER,
-                'BATCH_SIZE': BATCH_SIZE,
-                'LABEL_SMOOTHING': LABEL_SMOOTHING,
-                'DROPOUT': DROPOUT,
-                'CORT_ONLY': CORT_ONLY,
-                'MAX_ITR': ITERS,
-                'T_END': T_END
-            },
-            virtual=True,
-            permutations=perms,
-            ctrl_range=CTRL_RANGE,
-            mdd_range=MDD_RANGE,
-            # ableson_pop=True,
-            # plus_ableson_mdd=True,
-            # toy_data=True
-        )
-    else:
-        usage_hint()
 
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
