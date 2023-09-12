@@ -1,7 +1,7 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Fri Sep 08, 2023 | 10:12P EDT
+# Last Modified: Tue Sep 12, 2023 | 08:53P EDT
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
@@ -12,10 +12,11 @@ import torch.nn as nn
 import torchcde
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from copy import copy
 
 from torch.utils.data import DataLoader
-from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.nn.functional import binary_cross_entropy_with_logits, mse_loss
 from torchdiffeq import odeint_adjoint as odeint
 
 from neural_cde import NeuralCDE
@@ -38,6 +39,8 @@ HDIM: int = 0
 OUTPUT_CHANNELS: int = 0
 # Only necessary for RNN
 N_RECURS: int = 0
+CLASSIFY: bool = True # For use in choosing between classification/prediction
+MECHANISTIC: bool = False # Should the mechanistic components be included?
 
 # Training hyperparameters
 ITERS: int = 0
@@ -50,6 +53,7 @@ RTOL: float = 0.
 
 # Training data selection parameters
 PATIENT_GROUPS: list = []
+INDIVIDUAL_NUMBER: int = 0
 METHOD: str = ''
 NORMALIZE_STANDARDIZE: str = ''
 NOISE_MAGNITUDE: float = 0.
@@ -100,30 +104,31 @@ def test(hyperparameters: dict, virtual: bool=True,
                             else len(permutations[1])]
         )
         # Load the dataset for training
-        loader = load_data(
+        loader, t_steps = load_data(
             control_combination=control_combination,
             mdd_combination=mdd_combination,
             patient_groups=PATIENT_GROUPS, by_lab=by_lab,
             plus_ableson_mdd=plus_ableson_mdd,
             test=True
         )
-        model = model_init()
         info = {
             'ctrl_num': ctrl_num,
             'control_combination': control_combination,
             'mdd_num': mdd_num,
             'mdd_combination': mdd_combination,
             'by_lab': by_lab,
+            't_steps': t_steps,
         }
+        model = model_init(t_steps, info)
         with torch.no_grad():
             if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
-                run_ncde_testing(model, loader, info)
+                classification_ncde_testing(model, loader, info) if CLASSIFY else prediction_ncde_testing(model, loader, info)
             elif NETWORK_TYPE == 'NODE':
-                run_node_testing(model, loader, info)
+                classification_node_testing(model, loader, info) if CLASSIFY else prediction_node_testing(model, loader, info)
             elif NETWORK_TYPE == 'ANN':
-                run_ann_testing(model, loader, info)
+                classification_ann_testing(model, loader, info) if CLASSIFY else prediction_ann_testing(model, loader, info)
             elif NETWORK_TYPE == 'RNN':
-                run_rnn_testing(model, loader, info)
+                classification_rnn_testing(model, loader, info) if CLASSIFY else prediction_rnn_testing(model, loader, info)
             else:
                 raise ValueError(
                     "NETWORK_TYPE must be one of: NCDE, NODE or ANN"
@@ -132,30 +137,31 @@ def test(hyperparameters: dict, virtual: bool=True,
 def test_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
     """When we do not have a list of test patient groups, run a test on a
     single test population"""
-    loader = load_data(
+    loader, t_steps = load_data(
         virtual, POP_NUMBER, patient_groups=PATIENT_GROUPS,
         ableson_pop=ableson_pop, toy_data=toy_data, test=True
     )
 
-    model = NeuralCDE(
-        INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
-        device=DEVICE, dropout=DROPOUT
-    ).double()
-
     info = {
         'virtual': virtual,
         'ableson_pop': ableson_pop,
-        'toy_data': toy_data
+        'toy_data': toy_data,
+        't_steps': t_steps,
     }
+    model = model_init(t_steps, info)
     with torch.no_grad():
-        if NETWORK_TYPE == 'NCDE':
-            run_ncde_testing(model, loader, info)
-        elif NETWORK_TYPE == 'NCDE':
-            run_node_testing(model, loader, info)
-        elif NETWORK_TYPE == 'NCDE':
-            run_ann_testing(model, loader, info)
+        if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
+            classification_ncde_testing(model, loader, info) if CLASSIFY else prediction_ncde_testing(model, loader, info)
+        elif NETWORK_TYPE == 'NODE':
+            classification_node_testing(model, loader, info) if CLASSIFY else prediction_node_testing(model, loader, info)
+        elif NETWORK_TYPE == 'ANN':
+            classification_ann_testing(model, loader, info) if CLASSIFY else prediction_ann_testing(model, loader, info)
+        elif NETWORK_TYPE == 'RNN':
+            classification_rnn_testing(model, loader, info) if CLASSIFY else prediction_rnn_testing(model, loader, info)
         else:
-            raise ValueError("NETWORK_TYPE must be one of: NCDE, NODE, or ANN")
+            raise ValueError(
+                "NETWORK_TYPE must be one of: NCDE, NODE or ANN"
+            )
 
 
 def load_data(virtual: bool=True, pop_number: int=0,
@@ -163,13 +169,14 @@ def load_data(virtual: bool=True, pop_number: int=0,
               mdd_combination: tuple=(), patient_groups: list=[],
               by_lab: bool=False, ableson_pop: bool=False,
               plus_ableson_mdd: bool=False,
-              toy_data: bool=False, test: bool=False):
+              toy_data: bool=False, test: bool=True):
     if not patient_groups:
         patient_groups = PATIENT_GROUPS
     if not virtual:
         dataset = NelsonData(
             patient_groups=patient_groups,
-            normalize_standardize=NORMALIZE_STANDARDIZE
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+            individual_number=INDIVIDUAL_NUMBER,
         ) if not ableson_pop else AblesonData(
             patient_groups=copy(patient_groups),
             normalize_standardize=NORMALIZE_STANDARDIZE
@@ -229,13 +236,17 @@ def load_data(virtual: bool=True, pop_number: int=0,
             test=test,
             label_smoothing=LABEL_SMOOTHING
         )
+
+    t_steps = len(dataset[0][0][...,0])
     loader = DataLoader(
         dataset=dataset, batch_size=2000, shuffle=False
     )
-    return loader
+    return loader, t_steps
 
 
-def model_init():
+def model_init(t_steps: int, info: dict):
+    toy_data = info.get('toy_data', False)
+
     if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
         return NeuralCDE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
@@ -248,18 +259,19 @@ def model_init():
         ).double()
     if NETWORK_TYPE == 'ANN':
         return ANN(
-            INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
+            INPUT_CHANNELS*t_steps, HDIM,
+            OUTPUT_CHANNELS*t_steps,
             device=DEVICE,
         ).double()
     if NETWORK_TYPE == 'RNN':
         return RNN(
-            INPUT_CHANNELS, HDIM, N_RECURS,
-            device=DEVICE,
+            INPUT_CHANNELS*t_steps, HDIM,
+            N_RECURS, device=DEVICE,
         ).double()
     raise ValueError("NETWORK_TYPE unsupported")
 
 
-def run_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
+def classification_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     """Run the testing procedure for the given model and DataLoader"""
     ctrl_num = info.get('ctrl_num')
     control_combination = info.get('control_combination')
@@ -329,11 +341,13 @@ def run_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     elif toy_data:
         directory = (
             f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Toy Dataset/'
         )
     elif not POP_NUMBER:
         directory = (
             f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'{"By Lab" if by_lab else "By Diagnosis"}/'
             f'{"Control" if not by_lab else "Nelson"} '
             f'{ctrl_num} {control_combination}/'
@@ -342,6 +356,7 @@ def run_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     else:
         directory = (
             f'Network States (VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Control vs {PATIENT_GROUPS[1]} Population {POP_NUMBER}/'
         )
 
@@ -353,7 +368,7 @@ def run_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
         # Set the filename for the network state_dict
         if virtual:
             state_file = (
-                f'NN_state_{HDIM}nodes_NCDE_'
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_{"mechanistic_" if MECHANISTIC else ""}'
                 f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
                 f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
                 f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
@@ -403,18 +418,18 @@ def run_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
         for batch in loader:
             # Ensure the data is only CORT if CORT_ONLY, and that the data and
             #  labels are loaded into the proper device memory
-            (data, label) = batch
+            (data, labels) = batch
             if CORT_ONLY:
                 data = data[...,[0,2]]
             if toy_data and INPUT_CHANNELS == 3:
                 data = data[...,[0,2,3]]
             data = data.to(DEVICE)
-            label = label.to(DEVICE)
+            labels = labels.to(DEVICE) if CLASSIFY else data
             coeffs = torchcde.\
                 hermite_cubic_coefficients_with_backward_differences(data)
 
             pred_y = model(coeffs).squeeze(-1)
-            loss = binary_cross_entropy_with_logits(pred_y, label)
+            output = loss(pred_y, labels)
 
             # We need to run pred_y through a sigmoid layer to check for
             #  success and error because when training we use
@@ -422,16 +437,16 @@ def run_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
             #  layer with BCE (improved performance over running sigmoid then
             #  BCE with torch)
             pred_y = torch.sigmoid(pred_y)
-            error = torch.abs(label - pred_y)
+            error = torch.abs(labels - pred_y)
 
             # Rounding the predicted y to see if it was successful
             rounded_y = torch.round(pred_y)
-            success = [not y for y in torch.abs(label - rounded_y)]
+            success = [not y for y in torch.abs(labels - rounded_y)]
 
             # Create Pandas Series objects so that we can insert these only
             #  in the last row of each iteration prediction group
             cross_entropy_loss = pd.Series(
-                (loss.item(),),
+                (output.item(),),
                 index=(index[-1],)
             )
             success_pct = pd.Series(
@@ -460,7 +475,7 @@ def run_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     save_performance(performance_df, info)
 
 
-def run_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
+def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     """Run the testing procedure for the given model and DataLoader"""
     ctrl_num = info.get('ctrl_num')
     control_combination = info.get('control_combination')
@@ -525,16 +540,19 @@ def run_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     if not virtual:
         directory = (
             f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Control vs {PATIENT_GROUPS[1]}/'
         )
     elif toy_data:
         directory = (
             f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Toy Dataset/'
         )
     elif not POP_NUMBER:
         directory = (
             f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'{"By Lab" if by_lab else "By Diagnosis"}/'
             f'{"Control" if not by_lab else "Nelson"} '
             f'{ctrl_num} {control_combination}/'
@@ -553,7 +571,8 @@ def run_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
         # Set the filename for the network state_dict
         if virtual:
             state_file = (
-                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_{"mechanistic_" if MECHANISTIC else ""}'
+
                 f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
                 f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
                 f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
@@ -618,7 +637,7 @@ def run_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
             if toy_data and INPUT_CHANNELS == 2:
                 data = data[...,[2,3]]
             data = data.to(DEVICE)
-            labels = labels.to(DEVICE)
+            labels = labels.to(DEVICE) if CLASSIFY else data
             y0 = data[:,0,1:]
 
             # Compute the forward direction of the NODE
@@ -631,7 +650,7 @@ def run_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
             # We squeeze to remove the extraneous dimension of the output so that
             #  it matches the shape of the labels
             pred_y = readout(pred_y)[-1].squeeze(-1)
-            loss = binary_cross_entropy_with_logits(pred_y, labels)
+            output = loss(pred_y, labels)
 
             # We need to run pred_y through a sigmoid layer to check for
             #  success and error because when training we use
@@ -648,7 +667,7 @@ def run_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
             # Create Pandas Series objects so that we can insert these only
             #  in the last row of each iteration prediction group
             cross_entropy_loss = pd.Series(
-                (loss.item(),),
+                (output.item(),),
                 index=(index[-1],)
             )
             success_pct = pd.Series(
@@ -677,7 +696,7 @@ def run_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     save_performance(performance_df, info)
 
 
-def run_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
+def classification_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     """Run the testing procedure for the given model and DataLoader"""
     ctrl_num = info.get('ctrl_num')
     control_combination = info.get('control_combination')
@@ -687,6 +706,7 @@ def run_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     virtual = info.get('virtual', True)
     ableson_pop = info.get('ableson_pop', False)
     toy_data = info.get('toy_data', False)
+    t_steps = info.get('t_steps', 11)
 
     # Create the Pandas DataFrame which we will write to an Excel sheet
     performance_df = pd.DataFrame(
@@ -742,16 +762,19 @@ def run_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     if not virtual:
         directory = (
             f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Control vs {PATIENT_GROUPS[1]}/'
         )
     elif toy_data:
         directory = (
             f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Toy Dataset/'
         )
     elif not POP_NUMBER:
         directory = (
             f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'{"By Lab" if by_lab else "By Diagnosis"}/'
             f'{"Control" if not by_lab else "Nelson"} '
             f'{ctrl_num} {control_combination}/'
@@ -771,7 +794,7 @@ def run_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
         if virtual:
             state_file = (
                 f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
-                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_{"mechanistic_" if MECHANISTIC else ""}'
                 f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
                 f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
                 f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
@@ -828,16 +851,17 @@ def run_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
             elif toy_data and INPUT_CHANNELS == 2:
                 data = data[...,[2,3]]
             else:
-                data = data[...,1:].to(DEVICE)
-            labels = labels.to(DEVICE)
+                data = data[...,1:]
+            data = data.to(DEVICE)
+            labels = labels.to(DEVICE) if CLASSIFY else data
 
             # We need to reshape the data to fit the ANN properly
             pred_y = model(
                 data.reshape(
                     batch_size_,
-                    INPUT_CHANNELS)
-            ).squeeze(-1)
-            loss = binary_cross_entropy_with_logits(pred_y, labels)
+                    INPUT_CHANNELS*t_steps)
+            ).squeeze(-1).reshape(-1, labels.size(1), labels.size(2))
+            output = loss(pred_y, labels)
 
             # We need to run pred_y through a sigmoid layer to check for
             #  success and error because when training we use
@@ -854,7 +878,7 @@ def run_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
             # Create Pandas Series objects so that we can insert these only
             #  in the last row of each iteration prediction group
             cross_entropy_loss = pd.Series(
-                (loss.item(),),
+                (output.item(),),
                 index=(index[-1],)
             )
             success_pct = pd.Series(
@@ -883,7 +907,7 @@ def run_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     save_performance(performance_df, info)
 
 
-def run_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
+def classification_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     """Run the testing procedure for the given model and DataLoader"""
     ctrl_num = info.get('ctrl_num')
     control_combination = info.get('control_combination')
@@ -893,6 +917,7 @@ def run_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     virtual = info.get('virtual', True)
     ableson_pop = info.get('ableson_pop', False)
     toy_data = info.get('toy_data', False)
+    t_steps = info.get('t_steps', 11)
 
     # Create the Pandas DataFrame which we will write to an Excel sheet
     performance_df = pd.DataFrame(
@@ -948,16 +973,19 @@ def run_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     if not virtual:
         directory = (
             f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Control vs {PATIENT_GROUPS[1]}/'
         )
     elif toy_data:
         directory = (
             f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Toy Dataset/'
         )
     elif not POP_NUMBER:
         directory = (
             f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'{"By Lab" if by_lab else "By Diagnosis"}/'
             f'{"Control" if not by_lab else "Nelson"} '
             f'{ctrl_num} {control_combination}/'
@@ -976,7 +1004,7 @@ def run_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
         # Set the filename for the network state_dict
         if virtual:
             state_file = (
-                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_{"mechanistic_" if MECHANISTIC else ""}'
                 f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
                 f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
                 f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
@@ -1041,18 +1069,19 @@ def run_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
             elif toy_data and INPUT_CHANNELS == 2:
                 data = data[...,[2,3]]
             else:
-                data = data[...,1:].to(DEVICE)
-            labels = labels.to(DEVICE)
+                data = data[...,1:]
+            data = data.to(DEVICE)
+            labels = labels.to(DEVICE) if CLASSIFY else data
 
             # We need to reshape the data to fit the ANN properly
             pred_y = model(
                 data.reshape(
                     batch_size_,
-                    INPUT_CHANNELS)
+                    INPUT_CHANNELS*t_steps)
             )
-            pred_y = readout(pred_y).squeeze(-1)
+            pred_y = readout(pred_y).squeeze(-1).reshape(-1, labels.size(1), labels.size(2))
 
-            loss = binary_cross_entropy_with_logits(pred_y, labels)
+            output = loss(pred_y, labels)
 
             # We need to run pred_y through a sigmoid layer to check for
             #  success and error because when training we use
@@ -1069,7 +1098,7 @@ def run_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
             # Create Pandas Series objects so that we can insert these only
             #  in the last row of each iteration prediction group
             cross_entropy_loss = pd.Series(
-                (loss.item(),),
+                (output.item(),),
                 index=(index[-1],)
             )
             success_pct = pd.Series(
@@ -1098,10 +1127,753 @@ def run_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     save_performance(performance_df, info)
 
 
+def prediction_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
+    """Run the testing procedure for the given model and DataLoader"""
+    ctrl_num = info.get('ctrl_num')
+    control_combination = info.get('control_combination')
+    mdd_num = info.get('mdd_num')
+    mdd_combination = info.get('mdd_combination')
+    by_lab = info.get('by_lab')
+    virtual = info.get('virtual', True)
+    ableson_pop = info.get('ableson_pop', False)
+    toy_data = info.get('toy_data', False)
+
+    # Set up the index numbers to match the patient numbers of the test
+    #  patients (or just 1-5 for Control and the same for MDD if no test
+    #  combinations)
+    if control_combination:
+        index = control_combination+mdd_combination
+    elif ableson_pop:
+        index = [i for i in range(50)]
+    elif toy_data:
+        index = [i for i in range(2000)]
+    elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+        index = [INDIVIDUAL_NUMBER]
+    else:
+        index = [i for i in range(5)]
+        index = index+index
+
+    tmp_index = []
+    for i, entry in enumerate(index):
+        if ableson_pop:
+            if i < 37:
+                t = PATIENT_GROUPS[0] + ' ' +  str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif toy_data:
+            if i < 1000:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif control_combination:
+            if i < len(control_combination):
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            t = PATIENT_GROUPS[0] + ' ' + str(entry)
+        else:
+            if i < 5:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        tmp_index.append(t)
+    index = tuple(tmp_index)
+
+    # Set the directory name where the model state dictionaries are located
+    if not virtual and len(PATIENT_GROUPS) == 1:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{PATIENT_GROUPS[0]}/'
+        )
+    elif not virtual:
+        directory = (
+            f'Network States/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+        )
+    elif toy_data:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Toy Dataset/'
+        )
+    elif not POP_NUMBER:
+        directory = (
+            f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{"By Lab" if by_lab else "By Diagnosis"}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    else:
+        directory = (
+            f'Network States (VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]} Population {POP_NUMBER}/'
+        )
+
+    # Loop over the state dictionaries based on the number of iterations, from
+    #  100 to MAX_ITR*100
+    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    print(f"{n_saves=}")
+    for itr in range(1,n_saves+1):
+        # Set the filename for the network state_dict
+        if virtual:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_{"mechanistic_" if MECHANISTIC else ""}'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
+                f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}'
+                f'{"_byLab" if by_lab else ""}.txt'
+            )
+        elif ableson_pop:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination)}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination)}_'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        else:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'Control_vs_{PATIENT_GROUPS[1]}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        state_filepath = os.path.join(directory, state_file)
+        # Check that the file exists
+        if not os.path.exists(state_filepath):
+            raise FileNotFoundError(f'Failed to load file: {state_filepath}')
+        # Load the state dictionary from the file and set the model to that
+        #  state
+        state_dict = torch.load(state_filepath, map_location=DEVICE)
+        model.load_state_dict(state_dict)
+
+        # Pandas Series to allow us to insert the number of iterations for each
+        #  group of predicitons only in the first row of the group
+        iterations = pd.Series((itr*SAVE_FREQ,), index=(index[0],))
+
+        # Loop through the test patients
+        for (data, labels) in loader:
+            for i, pt in enumerate(data):
+                if INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+                    pt = pt.double().view(1,t_steps,-1)
+                # Ensure the data is only CORT if CORT_ONLY, and that the data and
+                #  labels are loaded into the proper device memory
+                data_orig = pt
+                if CORT_ONLY:
+                    pt = pt[...,[0,2]]
+                if toy_data and INPUT_CHANNELS == 3:
+                    pt = pt[...,[0,2,3]]
+                pt = pt.to(DEVICE)
+                labels = labels.to(DEVICE) if CLASSIFY else pt
+                coeffs = torchcde.\
+                    hermite_cubic_coefficients_with_backward_differences(data)
+
+                pred_y = model(coeffs).squeeze(-1)
+
+                if i < len(index)/2:
+                    patient_id = f'Control Patient {index[i]}'
+                else:
+                    patient_id = f'MDD Patient {index[i]}'
+
+                # Graph the results
+                graph_results(pred_y, data_orig, patient_id, itr, info)
+
+
+def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
+    """Run the testing procedure for the given model and DataLoader"""
+    ctrl_num = info.get('ctrl_num')
+    control_combination = info.get('control_combination')
+    mdd_num = info.get('mdd_num')
+    mdd_combination = info.get('mdd_combination')
+    by_lab = info.get('by_lab')
+    virtual = info.get('virtual', True)
+    ableson_pop = info.get('ableson_pop', False)
+    toy_data = info.get('toy_data', False)
+    t_steps = info.get('t_steps', 11)
+
+    # Set up the index numbers to match the patient numbers of the test
+    #  patients (or just 1-5 for Control and the same for MDD if no test
+    #  combinations)
+    if control_combination:
+        index = control_combination+mdd_combination
+    elif ableson_pop:
+        index = [i for i in range(50)]
+    elif toy_data:
+        index = [i for i in range(2000)]
+    elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+        index = [INDIVIDUAL_NUMBER]
+    else:
+        index = [i for i in range(5)]
+        index = index+index
+
+    tmp_index = []
+    for i, entry in enumerate(index):
+        if ableson_pop:
+            if i < 37:
+                t = PATIENT_GROUPS[0] + ' ' +  str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif toy_data:
+            if i < 1000:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif control_combination:
+            if i < len(control_combination):
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            t = PATIENT_GROUPS[0] + ' ' + str(entry)
+        else:
+            if i < 5:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        tmp_index.append(t)
+    index = tuple(tmp_index)
+
+    # Set the directory name where the model state dictionaries are located
+    if not virtual and len(PATIENT_GROUPS) == 1:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{PATIENT_GROUPS[0]}/'
+        )
+    elif not virtual:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+        )
+    elif toy_data:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Toy Dataset/'
+        )
+    elif not POP_NUMBER:
+        directory = (
+            f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{"By Lab" if by_lab else "By Diagnosis"}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    else:
+        directory = (
+            f'Network States (VPOP Training)/'
+            f'Control vs {PATIENT_GROUPS[1]} Population {POP_NUMBER}/'
+        )
+
+    # Loop over the state dictionaries based on the number of iterations, from
+    #  100 to MAX_ITR*100
+    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    for itr in range(1,n_saves+1):
+        # Set the filename for the network state_dict
+        if virtual:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_{"mechanistic_" if MECHANISTIC else ""}'
+
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
+                f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}'
+                f'{"_byLab" if by_lab else ""}.txt'
+            )
+        elif ableson_pop:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination)}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination)}_'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        else:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'Control_vs_{PATIENT_GROUPS[1]}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        readout_filename = "".join(
+            [state_file[:-4], '_readout', state_file[-4:]]
+        )
+        state_filepath = os.path.join(directory, state_file)
+        readout_filepath = os.path.join(directory, readout_filename)
+        # Check that the file exists
+        if not os.path.exists(state_filepath):
+            raise FileNotFoundError(f'Failed to load file: {state_filepath}')
+        # Load the state dictionary from the file and set the model to that
+        #  state
+        state_dict = torch.load(state_filepath, map_location=DEVICE)
+        model.load_state_dict(state_dict)
+
+        # Loop through the test patients
+        for (data, labels) in loader:
+            for i, pt in enumerate(data):
+                if INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+                    pt = pt.double().view(1,t_steps,INPUT_CHANNELS+1)
+                data_orig = pt
+                t_eval = pt[0,:,0].view(-1)
+                # Ensure we have assigned the data and labels to the correct
+                #  processing device
+                if CORT_ONLY:
+                    # If we are only using CORT, we can discard the middle column as it
+                    #  contains the ACTH concentrations
+                    pt = pt[...,2]
+                if toy_data and INPUT_CHANNELS == 2:
+                    pt = pt[...,[2,3]]
+                pt = pt.to(DEVICE)
+                labels = labels.to(DEVICE) if CLASSIFY else pt
+                y0 = pt[:,0,1:]
+
+                # Compute the forward direction of the NODE
+                pred_y = odeint(
+                    model, y0, t_eval
+                ).squeeze(-1)
+
+                if i < len(index)/2:
+                    patient_id = f'Control Patient {index[i]}'
+                else:
+                    patient_id = f'MDD Patient {index[i]}'
+
+                # Graph the results
+                graph_results(pred_y, data_orig, patient_id, itr, info)
+
+
+def prediction_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
+    """Run the testing procedure for the given model and DataLoader"""
+    ctrl_num = info.get('ctrl_num')
+    control_combination = info.get('control_combination')
+    mdd_num = info.get('mdd_num')
+    mdd_combination = info.get('mdd_combination')
+    by_lab = info.get('by_lab')
+    virtual = info.get('virtual', True)
+    ableson_pop = info.get('ableson_pop', False)
+    toy_data = info.get('toy_data', False)
+    t_steps = info.get('t_steps', 11)
+
+    # Set up the index numbers to match the patient numbers of the test
+    #  patients (or just 1-5 for Control and the same for MDD if no test
+    #  combinations)
+    if control_combination:
+        index = control_combination+mdd_combination
+    elif ableson_pop:
+        index = [i for i in range(50)]
+    elif toy_data:
+        index = [i for i in range(2000)]
+    elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+        index = [INDIVIDUAL_NUMBER]
+    else:
+        index = [i for i in range(5)]
+        index = index+index
+
+    tmp_index = []
+    for i, entry in enumerate(index):
+        if ableson_pop:
+            if i < 37:
+                t = PATIENT_GROUPS[0] + ' ' +  str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif toy_data:
+            if i < 1000:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif control_combination:
+            if i < len(control_combination):
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            t = PATIENT_GROUPS[0] + ' ' + str(entry)
+        else:
+            if i < 5:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        tmp_index.append(t)
+    index = tuple(tmp_index)
+
+    # Set the directory name where the model state dictionaries are located
+    if not virtual and len(PATIENT_GROUPS) == 1:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{PATIENT_GROUPS[0]}/'
+        )
+    elif not virtual:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+        )
+    elif toy_data:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Toy Dataset/'
+        )
+    elif not POP_NUMBER:
+        directory = (
+            f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{"By Lab" if by_lab else "By Diagnosis"}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    else:
+        directory = (
+            f'Network States (VPOP Training)/'
+            f'Control vs {PATIENT_GROUPS[1]} Population {POP_NUMBER}/'
+        )
+
+    # Loop over the state dictionaries based on the number of iterations, from
+    #  100 to MAX_ITR*100
+    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    for itr in range(1,n_saves+1):
+        # Set the filename for the network state_dict
+        if virtual:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_{"mechanistic_" if MECHANISTIC else ""}'
+                f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
+                f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}'
+                f'{"_byLab" if by_lab else ""}.txt'
+            )
+        elif ableson_pop:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination)}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination)}_'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        else:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'Control_vs_{PATIENT_GROUPS[1]}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        state_filepath = os.path.join(directory, state_file)
+        # Check that the file exists
+        if not os.path.exists(state_filepath):
+            raise FileNotFoundError(f'Failed to load file: {state_filepath}')
+        # Load the state dictionary from the file and set the model to that
+        #  state
+        state_dict = torch.load(state_filepath, map_location=DEVICE)
+        model.load_state_dict(state_dict)
+
+        # Loop through the test patients
+        for i, (data, labels) in enumerate(loader):
+            for i, pt in enumerate(data):
+                if INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+                    pt = pt.double().view(1,t_steps,-1)
+                data_orig = pt
+                # Here, we only ever have a batch size of 1 for plotting
+                batch_size_ = 1
+                # Ensure the data is only CORT if CORT_ONLY, and that the data and
+                #  labels are loaded into the proper device memory
+                if CORT_ONLY:
+                    pt = pt[...,2]
+                elif toy_data and INPUT_CHANNELS == 2:
+                    pt = pt[...,[2,3]]
+                else:
+                    pt = pt[...,1:]
+                pt = pt.to(DEVICE)
+                labels = labels.to(DEVICE) if CLASSIFY else pt
+
+                # We need to reshape the data to fit the ANN properly
+                pred_y = model(
+                    pt.reshape(
+                        batch_size_,
+                        INPUT_CHANNELS*t_steps)
+                ).squeeze(-1).reshape(-1, labels.size(1))
+
+                if i < len(index)/2:
+                    patient_id = f'Control Patient {index[i]}'
+                else:
+                    patient_id = f'MDD Patient {index[i]}'
+
+                # Graph the results
+                graph_results(pred_y, data_orig, patient_id, itr, info)
+
+
+def prediction_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
+    """Run the testing procedure for the given model and DataLoader"""
+    ctrl_num = info.get('ctrl_num')
+    control_combination = info.get('control_combination')
+    mdd_num = info.get('mdd_num')
+    mdd_combination = info.get('mdd_combination')
+    by_lab = info.get('by_lab')
+    virtual = info.get('virtual', True)
+    ableson_pop = info.get('ableson_pop', False)
+    toy_data = info.get('toy_data', False)
+    t_steps = info.get('t_steps', 11)
+
+    # Set up the index numbers to match the patient numbers of the test
+    #  patients (or just 1-5 for Control and the same for MDD if no test
+    #  combinations)
+    if control_combination:
+        index = control_combination+mdd_combination
+    elif ableson_pop:
+        index = [i for i in range(50)]
+    elif toy_data:
+        index = [i for i in range(2000)]
+    elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+        index = [INDIVIDUAL_NUMBER]
+    else:
+        index = [i for i in range(5)]
+        index = index+index
+
+    tmp_index = []
+    for i, entry in enumerate(index):
+        if ableson_pop:
+            if i < 37:
+                t = PATIENT_GROUPS[0] + ' ' +  str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif toy_data:
+            if i < 1000:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif control_combination:
+            if i < len(control_combination):
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            t = PATIENT_GROUPS[0] + ' ' + str(entry)
+        else:
+            if i < 5:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        tmp_index.append(t)
+    index = tuple(tmp_index)
+
+    # Set the directory name where the model state dictionaries are located
+    if not virtual and len(PATIENT_GROUPS) == 1:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{PATIENT_GROUPS[0]}/'
+        )
+    elif not virtual:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+        )
+    elif toy_data:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Toy Dataset/'
+        )
+    elif not POP_NUMBER:
+        directory = (
+            f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{"By Lab" if by_lab else "By Diagnosis"}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    else:
+        directory = (
+            f'Network States (VPOP Training)/'
+            f'Control vs {PATIENT_GROUPS[1]} Population {POP_NUMBER}/'
+        )
+
+    # Loop over the state dictionaries based on the number of iterations, from
+    #  100 to MAX_ITR*100
+    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    for itr in range(1,n_saves+1):
+        # Set the filename for the network state_dict
+        if virtual:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_{"mechanistic_" if MECHANISTIC else ""}'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
+                f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}'
+                f'{"_byLab" if by_lab else ""}.txt'
+            )
+        elif ableson_pop:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination)}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination)}_'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        else:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'Control_vs_{PATIENT_GROUPS[1]}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        readout_filename = "".join(
+            [state_file[:-4], '_readout', state_file[-4:]]
+        )
+        state_filepath = os.path.join(directory, state_file)
+        readout_filepath = os.path.join(directory, readout_filename)
+        # Check that the file exists
+        if not os.path.exists(state_filepath):
+            raise FileNotFoundError(f'Failed to load file: {state_filepath}')
+        # Load the state dictionary from the file and set the model to that
+        #  state
+        state_dict = torch.load(state_filepath, map_location=DEVICE)
+        readout_state_dict = torch.load(readout_filepath, map_location=DEVICE)
+        model.load_state_dict(state_dict)
+        readout = nn.Linear(HDIM, 1).double()
+        readout.load_state_dict(readout_state_dict)
+
+        # Loop through the test patients
+        for (data, labels) in loader:
+            for i, pt in enumerate(data):
+                if INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+                    pt = pt.double().view(1,t_steps,-1)
+                data_orig = pt
+                # Here, we only ever have a batch size of 1 for plotting
+                batch_size_ = 1
+                # Ensure the data is only CORT if CORT_ONLY, and that the data and
+                #  labels are loaded into the proper device memory
+                if CORT_ONLY:
+                    pt = pt[...,2]
+                elif toy_data and INPUT_CHANNELS == 2:
+                    pt = pt[...,[2,3]]
+                else:
+                    pt = pt[...,1:]
+                pt = pt.to(DEVICE)
+                labels = labels.to(DEVICE) if CLASSIFY else pt
+
+                # We need to reshape the data to fit the ANN properly
+                pred_y = model(
+                    pt.reshape(
+                        batch_size_,
+                        INPUT_CHANNELS*t_steps)
+                )
+                pred_y = readout(pred_y).squeeze(-1).reshape(
+                    -1, labels.size(1),
+                )
+
+                if i < len(index)/2:
+                    patient_id = f'Control Patient {index[i]}'
+                else:
+                    patient_id = f'MDD Patient {index[i]}'
+
+                # Graph the results
+                graph_results(pred_y, data_orig, patient_id, itr, info)
+
+
+def loss(pred_y, labels):
+    """To compute the loss with potential mechanistic components"""
+    if CLASSIFY:
+        return binary_cross_entropy_with_logits(pred_y, labels)
+
+    if MECHANISTIC:
+        pass
+
+    return mse_loss(pred_y, labels)
+
+
 def save_performance(performance_df: pd.DataFrame, info: dict):
     """Save the performance characteristics to an Excel spreadsheet"""
-    # DataFrame to track performance (with a row for each network state at
-    #  multiples of 100 iterations)
     # Access the necessary variables from the info dictionary
     virtual = info.get('virtual', True)
     ctrl_num = info.get('ctrl_num')
@@ -1115,17 +1887,20 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
     #  training
     if not virtual:
         directory = (
-            f'Classification Results/'
+            f'Results/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Control vs {PATIENT_GROUPS[1]}/'
         )
     elif toy_data:
         directory = (
-            f'Classification Results/'
+            f'Results/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Toy Dataset/'
         )
     elif not POP_NUMBER:
         directory = (
-            f'Classification Results/Augmented Data/'
+            f'Results/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/Augmented Data/'
             f'{"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Classification/'
             f'{"By Lab" if by_lab else "By Diagnosis"}/'
             f'{"Control" if not by_lab else "Nelson"} '
@@ -1134,7 +1909,8 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
         )
     else:
         directory = (
-            f'Classification Results/Augmented Data/'
+            f'Results/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/Augmented Data/'
             f'VPOP Classification/'
             f'Control vs {PATIENT_GROUPS[1]} Population {POP_NUMBER}/'
         )
@@ -1167,6 +1943,110 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
 
     with pd.ExcelWriter(os.path.join(directory, filename)) as writer:
         performance_df.to_excel(writer)
+
+
+def graph_results(pred_y: torch.Tensor, data: torch.Tensor, patient_id: str,
+                  save_num: int, info: dict):
+    # Access the necessary variables from the info dictionary
+    virtual = info.get('virtual', True)
+    ctrl_num = info.get('ctrl_num')
+    control_combination = info.get('control_combination')
+    mdd_num = info.get('mdd_num')
+    mdd_combination = info.get('mdd_combination')
+    by_lab = info.get('by_lab')
+    toy_data = info.get('toy_data', False)
+
+    # Convert the save number to the number of iterations
+    itr = save_num*SAVE_FREQ
+
+    # Set the directory name based on which type of dataset was used for the
+    #  training
+    if not virtual and len(PATIENT_GROUPS) == 1:
+        directory = (
+            f'Results/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{PATIENT_GROUPS[0]}/'
+        )
+    elif not virtual:
+        directory = (
+            f'Results/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+        )
+    elif toy_data:
+        directory = (
+            f'Results/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Toy Dataset/'
+        )
+    elif not POP_NUMBER:
+        directory = (
+            f'Results/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/Augmented Data/'
+            f'{"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Classification/'
+            f'{"By Lab" if by_lab else "By Diagnosis"}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    else:
+        directory = (
+            f'Results/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/Augmented Data/'
+            f'VPOP Classification/'
+            f'Control vs {PATIENT_GROUPS[1]} Population {POP_NUMBER}/'
+        )
+
+    # Make sure the directory exists before we try to write anything
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    # Set the filename for the network state_dict
+    if not virtual and len(PATIENT_GROUPS) == 1:
+        filename = (
+            f'{NETWORK_TYPE}_{HDIM}nodes_'
+            f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+            f'batchsize{BATCH_SIZE}_'
+            f'{MAX_ITR}maxITER_{NORMALIZE_STANDARDIZE}_'
+            f'smoothing{LABEL_SMOOTHING}_'
+            f'dropout{DROPOUT}_'
+        )
+    elif not virtual:
+        filename = (
+            f'{NETWORK_TYPE}_{HDIM}nodes_'
+            f'Control_vs_{PATIENT_GROUPS[1]}_'
+            f'batchsize{BATCH_SIZE}_'
+            f'{MAX_ITR}maxITER_{NORMALIZE_STANDARDIZE}_'
+            f'smoothing{LABEL_SMOOTHING}_'
+            f'dropout{DROPOUT}_'
+        )
+    else:
+        filename = (
+            f'{NETWORK_TYPE}_{HDIM}nodes_'
+            f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+            f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
+            f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
+            f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
+            f'{NUM_PER_PATIENT}perPatient_'
+            f'batchsize{BATCH_SIZE}_'
+            f'{MAX_ITR}maxITER_{NORMALIZE_STANDARDIZE}_'
+            f'smoothing{LABEL_SMOOTHING}_'
+            f'dropout{DROPOUT}_'
+            f'{"_byLab" if by_lab else ""}_'
+        )
+
+    pred_y = pred_y.view(data.size(1), data.size(2)-1)
+    fig, axes = plt.subplots(nrows=INPUT_CHANNELS, figsize=(10,10))
+    for idx,ax in enumerate(range(INPUT_CHANNELS)):
+        axes[ax].plot(data[...,0].squeeze(), data[...,idx+1].squeeze(), 'o', label=patient_id)
+        axes[ax].plot(
+            data[...,0].squeeze(), pred_y[:,idx], label=f'Predicted y ({itr} iterations)'
+        )
+        axes[ax].set(title=patient_id, xlabel='Time (normalized)', ylabel='Concentration')
+        axes[ax].legend(fancybox=True, shadow=True, loc='upper right')
+
+    plt.savefig(os.path.join(directory, filename+patient_id+'.png'), dpi=300)
+    plt.close(fig)
 
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#

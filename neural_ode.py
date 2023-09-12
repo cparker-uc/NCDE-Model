@@ -1,7 +1,7 @@
 # File Name: neural_ode.py
 # Author: Christopher Parker
 # Created: Mon Aug 14, 2023 | 11:02P EDT
-# Last Modified: Fri Sep 08, 2023 | 10:12P EDT
+# Last Modified: Tue Sep 12, 2023 | 02:26P EDT
 
 """Contains the class for running NODE training"""
 
@@ -16,11 +16,27 @@ class NeuralODE(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(input_channels, hdim),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hdim, hdim),
-            nn.ReLU(),
+            nn.Tanh(),
+            nn.Linear(hdim, hdim),
+            nn.Tanh(),
+            nn.Linear(hdim, hdim),
+            nn.Tanh(),
+            nn.Linear(hdim, hdim),
+            nn.Tanh(),
+            nn.Linear(hdim, hdim),
+            nn.Tanh(),
+            nn.Linear(hdim, hdim),
+            nn.Tanh(),
+            nn.Linear(hdim, hdim),
+            nn.Tanh(),
+            nn.Linear(hdim, hdim),
+            nn.Tanh(),
+            nn.Linear(hdim, hdim),
+            nn.Tanh(),
             nn.Linear(hdim, output_channels),
-            nn.ReLU(),
+            nn.Tanh(),
         ).to(device)
 
         for m in self.net.modules():

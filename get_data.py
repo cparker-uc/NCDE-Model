@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Fri Jul 28, 2023 | 12:06P EDT
+# Last Modified: Tue Sep 12, 2023 | 01:31P EDT
 
 import os
 import torch
@@ -88,6 +88,8 @@ class NonAugmentedDataset(Dataset):
 
     def __getitem__(self, idx: int):
         "Get the requested patient data and label for index idx"
+        if self.individual_number and len(self.patient_groups) == 1:
+            return self.X, self.y
         return self.X[idx,...], self.y[idx]
 
 
@@ -95,18 +97,19 @@ class NelsonData(NonAugmentedDataset):
     """This class loads the original Nelson TSST data, with no
     virtual patients included"""
     def __init__(self, patient_groups: list[str],
-                 normalize_standardize: str,
+                 normalize_standardize: str, individual_number: int=0,
                  data_dir: str='Nelson TSST Individual Patient Data'):
         super().__init__(data_dir, normalize_standardize)
 
         # Length and label for each patient group in the dataset
         self.group_info = {
-            'Control': (15, 0),
-            'Melancholic': (15, 1),
-            'Atypical': (14, 1),
-            'Neither': (14, 1)
+            'Control': [15, 0],
+            'Melancholic': [15, 1],
+            'Atypical': [14, 1],
+            'Neither': [14, 1]
         }
         self.patient_groups = patient_groups
+        self.individual_number = individual_number
 
         # Loop through the patient groups calling self.load_group
         for group in self.patient_groups:
@@ -118,6 +121,11 @@ class NelsonData(NonAugmentedDataset):
             )
 
         self.X = self.norm_data(self.X)
+
+        if len(patient_groups) == 1 and individual_number:
+            self.group_info[patient_groups[0]][0] = 1
+            self.X = self.X[individual_number-1,...]
+            self.y = self.y[individual_number-1]
 
 
 class AblesonData(NonAugmentedDataset):
@@ -256,4 +264,5 @@ if __name__ == '__main__':
 # DEALINGS IN THE SOFTWARE.                                                   #
 #                                                                             #
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
+
 

@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Fri Sep 08, 2023 | 11:37P EDT
+# Last Modified: Tue Sep 12, 2023 | 02:00P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -37,7 +37,7 @@ HDIM: int = 0
 OUTPUT_CHANNELS: int = 0
 N_RECURS: int = 0 # Only for RNN
 CLASSIFY: bool = True # For use in choosing between classification/prediction
-MECHANISTIC: bool = False
+MECHANISTIC: bool = False # Should the mechanistic components be included?
 
 # Training hyperparameters
 ITERS: int = 0
@@ -50,6 +50,7 @@ RTOL: float = 0.
 
 # Training data selection parameters
 PATIENT_GROUPS: list = []
+INDIVIDUAL_NUMBER: int = 0
 METHOD: str = ''
 NORMALIZE_STANDARDIZE: str = ''
 NOISE_MAGNITUDE: float = 0.
@@ -97,12 +98,11 @@ def train(hyperparameters: dict, virtual: bool=True,
                             else len(permutations[1])]
         )
         # Load the dataset for training
-        loader = load_data(
+        loader, t_steps = load_data(
             control_combination=control_combination,
             mdd_combination=mdd_combination, by_lab=by_lab,
             plus_ableson_mdd=plus_ableson_mdd
         )
-        model = model_init()
         info = {
             'virtual': virtual,
             'ctrl_num': ctrl_num,
@@ -110,20 +110,23 @@ def train(hyperparameters: dict, virtual: bool=True,
             'mdd_num': mdd_num,
             'mdd_combination': mdd_combination,
             'by_lab': by_lab,
+            't_steps': t_steps,
         }
+        model = model_init(info)
         run_training(model, loader, info)
 
 
 def train_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
-    loader = load_data(
+    loader, t_steps = load_data(
         virtual, POP_NUMBER, ableson_pop=ableson_pop, toy_data=toy_data
     )
 
-    model = model_init()
     info = {
         'virtual': virtual,
-        'toy_data': toy_data
+        'toy_data': toy_data,
+        't_steps': t_steps,
     }
+    model = model_init(info)
     run_training(model, loader, info)
 
 
@@ -138,7 +141,8 @@ def load_data(virtual: bool=True, pop_number: int=0,
     if not virtual:
         dataset = NelsonData(
             patient_groups=patient_groups,
-            normalize_standardize=NORMALIZE_STANDARDIZE
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+            individual_number=INDIVIDUAL_NUMBER,
         ) if not ableson_pop else AblesonData(
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE
@@ -199,13 +203,19 @@ def load_data(virtual: bool=True, pop_number: int=0,
             test=test,
             label_smoothing=LABEL_SMOOTHING
         )
+    if not virtual and INDIVIDUAL_NUMBER:
+        t_steps = len(dataset[...,0])
+    else:
+        t_steps = len(dataset[0][0][...,0])
     loader = DataLoader(
         dataset=dataset, batch_size=BATCH_SIZE, shuffle=True
     )
-    return loader
+    return loader, t_steps
 
 
-def model_init():
+def model_init(info: dict):
+    toy_data = info.get('toy_data', False)
+    t_steps = info.get('t_steps', 11)
     if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
         return NeuralCDE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
@@ -218,12 +228,13 @@ def model_init():
         ).double()
     elif NETWORK_TYPE == 'ANN':
         return ANN(
-            INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
+            INPUT_CHANNELS*t_steps, HDIM,
+            OUTPUT_CHANNELS*t_steps,
             device=DEVICE
         ).double()
     elif NETWORK_TYPE == 'RNN':
         return RNN(
-            INPUT_CHANNELS, HDIM, N_RECURS,
+            INPUT_CHANNELS*t_steps, HDIM, N_RECURS,
             device=DEVICE,
         ).double()
     else:
@@ -239,7 +250,9 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
     toy_data = info.get('toy_data', False)
 
     # Print which population we are using to train
-    if not virtual:
+    if not virtual and INDIVIDUAL_NUMBER:
+        print(f'Starting Training w/ {PATIENT_GROUPS[0]} #{INDIVIDUAL_NUMBER}')
+    elif not virtual:
         print(f'Starting Training w/ {PATIENT_GROUPS[0]} '
               f'vs {PATIENT_GROUPS[1]}')
     elif POP_NUMBER:
@@ -269,23 +282,23 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
     for itr in range(1, ITERS+1):
         match NETWORK_TYPE:
             case 'NCDE':
-                ncde_training_epoch(itr, loader, model, optimizer, loss_over_time,
+                ncde_training_epoch(itr, loader, model, optimizer, loss_over_time, info,
                                     toy_data=toy_data)
             case 'NCDE_LBFGS':
                 optimizer = optim.LBFGS(
                     model.parameters()
                 )
-                ncde_training_epoch_lbfgs(itr, loader, model, optimizer, loss_over_time,
+                ncde_training_epoch_lbfgs(itr, loader, model, optimizer, loss_over_time, info,
                                     toy_data=toy_data)
             case 'NODE':
                 node_training_epoch(itr, loader, model, readout,
-                                    optimizer, loss_over_time, toy_data=toy_data)
+                                    optimizer, loss_over_time, info, toy_data=toy_data)
             case 'ANN':
                 ann_training_epoch(itr, loader, model, optimizer, loss_over_time,
-                                   toy_data=toy_data)
+                                   info, toy_data=toy_data)
             case 'RNN':
                 rnn_training_epoch(itr, loader, model, readout,
-                                   optimizer, loss_over_time, toy_data=toy_data)
+                                   optimizer, loss_over_time, info, toy_data=toy_data)
             case _:
                 raise ValueError("NETWORK_TYPE must be one of NCDE, NODE, ANN, or RNN")
 
@@ -314,7 +327,8 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
 
 
 def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
-                   optimizer: optim.AdamW, loss_over_time: list, toy_data: bool=False):
+                        optimizer: optim.AdamW, loss_over_time: list, info: dict,
+                        toy_data: bool=False):
 
     for j, (data, labels) in enumerate(loader):
         # Ensure we have assigned the data and labels to the correct
@@ -325,8 +339,10 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             data = data[...,[0,2]]
         if toy_data and INPUT_CHANNELS == 3:
             data = data[...,[0,2,3]]
-        labels = labels.to(DEVICE) if CLASSIFY else data.to(DEVICE)
-        data = data.to(DEVICE)
+        # If we are using prediction mode instead of classification, we need
+        #  the data and labels to be the same
+        data = data.double().to(DEVICE)
+        labels = labels.to(DEVICE) if CLASSIFY else data
         coeffs = torchcde.\
             hermite_cubic_coefficients_with_backward_differences(
                 data
@@ -339,7 +355,7 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         pred_y = model(coeffs).squeeze(-1)
 
         # Compute the loss based on the results
-        output = prediction_loss(pred_y, labels)
+        output = loss(pred_y, labels)
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -359,7 +375,8 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
 
 
 def ncde_training_epoch_lbfgs(itr: int, loader: DataLoader, model: NeuralCDE,
-                   optimizer: optim.AdamW | optim.LBFGS, loss_over_time: list, toy_data: bool=False):
+                              optimizer: optim.AdamW | optim.LBFGS, loss_over_time: list, info: dict,
+                              toy_data: bool=False):
 
     for j, (data, labels) in enumerate(loader):
         # Ensure we have assigned the data and labels to the correct
@@ -370,8 +387,8 @@ def ncde_training_epoch_lbfgs(itr: int, loader: DataLoader, model: NeuralCDE,
             data = data[...,[0,2]]
         if toy_data and INPUT_CHANNELS == 3:
             data = data[...,[0,2,3]]
-        labels = labels.to(DEVICE) if CLASSIFY else data.to(DEVICE)
-        data = data.to(DEVICE)
+        data = data.double().to(DEVICE)
+        labels = labels.to(DEVICE) if CLASSIFY else data
         coeffs = torchcde.\
             hermite_cubic_coefficients_with_backward_differences(
                 data
@@ -386,7 +403,7 @@ def ncde_training_epoch_lbfgs(itr: int, loader: DataLoader, model: NeuralCDE,
             pred_y = model(coeffs).squeeze(-1)
 
             # Compute the loss based on the results
-            output = prediction_loss(pred_y, labels)
+            output = loss(pred_y, labels)
 
             # This happens in place, so we don't need to return loss_over_time
             loss_over_time.append((j, output.item()))
@@ -410,8 +427,7 @@ def ncde_training_epoch_lbfgs(itr: int, loader: DataLoader, model: NeuralCDE,
 
 def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
                         readout: nn.Linear, optimizer: optim.AdamW,
-                        loss_over_time: list, toy_data: bool=False):
-
+                        loss_over_time: list, info: dict, toy_data: bool=False):
     for j, (data, labels) in enumerate(loader):
         t_eval = data[0,:,0].view(-1)
         # Ensure we have assigned the data and labels to the correct
@@ -424,8 +440,8 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
             data = data[...,[2,3]]
         else:
             data = data[...,1:]
-        labels = labels.to(DEVICE) if CLASSIFY else data.to(DEVICE)
-        data = data.to(DEVICE)
+        data = data.double().to(DEVICE)
+        labels = labels.to(DEVICE) if CLASSIFY else data
         y0 = data[:,0,:]
 
         # Zero the gradient from the previous data
@@ -440,10 +456,10 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
         #  the network)
         # We squeeze to remove the extraneous dimension of the output so that
         #  it matches the shape of the labels
-        pred_y = readout(pred_y)[-1].squeeze(-1)
+        pred_y = readout(pred_y)[-1].squeeze(-1) if CLASSIFY else pred_y.squeeze(-1)
 
         # Compute the loss based on the results
-        output = prediction_loss(pred_y, labels)
+        output = loss(pred_y, labels)
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -463,7 +479,7 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
 
 
 def ann_training_epoch(itr: int, loader: DataLoader, model: ANN,
-                       optimizer: optim.AdamW, loss_over_time: list,
+                       optimizer: optim.AdamW, loss_over_time: list, info: dict,
                        toy_data: bool=False):
 
     for j, (data, labels) in enumerate(loader):
@@ -480,8 +496,8 @@ def ann_training_epoch(itr: int, loader: DataLoader, model: ANN,
             data = data[...,[2,3]]
         else:
             data = data[...,1:]
-        labels = labels.to(DEVICE) if CLASSIFY else data.to(DEVICE)
-        data = data.to(DEVICE)
+        data = data.double().to(DEVICE)
+        labels = labels.to(DEVICE) if CLASSIFY else data
 
         # Zero the gradient from the previous data
         optimizer.zero_grad()
@@ -492,10 +508,12 @@ def ann_training_epoch(itr: int, loader: DataLoader, model: ANN,
         )
         # Remove the extraneous dimension from the output of the network so the
         #  shape matches the labels
-        pred_y = pred_y.squeeze(-1)
+        # We also need to reshape the output so that it has the number of
+        #  columns necessary
+        pred_y = pred_y.squeeze(-1).reshape(-1, labels.size(1), labels.size(2))
 
         # Compute the loss based on the results
-        output = prediction_loss(pred_y, labels)
+        output = loss(pred_y, labels)
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -516,7 +534,7 @@ def ann_training_epoch(itr: int, loader: DataLoader, model: ANN,
 
 def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
                        readout: nn.Linear, optimizer: optim.AdamW,
-                       loss_over_time: list, toy_data: bool=False):
+                       loss_over_time: list, info: dict, toy_data: bool=False):
 
     for j, (data, labels) in enumerate(loader):
         # Check how many patients are in the batch (as it may be less than
@@ -532,8 +550,8 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
             data = data[...,[2,3]]
         else:
             data = data[...,1:]
-        labels = labels.to(DEVICE) if CLASSIFY else data.to(DEVICE)
-        data = data.to(DEVICE)
+        data = data.double().to(DEVICE)
+        labels = labels.to(DEVICE) if CLASSIFY else data
 
         # Zero the gradient from the previous data
         optimizer.zero_grad()
@@ -544,10 +562,12 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
         )
         # Remove the extraneous dimension from the output of the network so the
         #  shape matches the labels
-        pred_y = readout(pred_y).squeeze(-1)
+        pred_y = readout(pred_y).squeeze(-1).reshape(
+            -1, labels.size(1), labels.size(2)
+        ) if CLASSIFY else pred_y.squeeze(-1)
 
         # Compute the loss based on the results
-        output = prediction_loss(pred_y, labels)
+        output = loss(pred_y, labels)
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -566,7 +586,7 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
             print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
 
 
-def prediction_loss(pred_y, labels):
+def loss(pred_y, labels):
     """To compute the loss with potential mechanistic components"""
     if CLASSIFY:
         return binary_cross_entropy_with_logits(pred_y, labels)
@@ -574,10 +594,11 @@ def prediction_loss(pred_y, labels):
     if MECHANISTIC:
         pass
 
-    return mse_loss(pred_y, labels)
+    return mse_loss(pred_y, labels.reshape(pred_y.shape))
 
 
-def save_network(model: NeuralCDE, readout: type[Any], optimizer: optim.AdamW,
+def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,
+                 readout: nn.Linear | None, optimizer: optim.AdamW,
                  info: dict):
     """Save the network state_dict and the training hyperparameters in the
     relevant directory"""
@@ -595,19 +616,28 @@ def save_network(model: NeuralCDE, readout: type[Any], optimizer: optim.AdamW,
 
     # Set the directory name based on which type of dataset was used for the
     #  training
-    if not virtual:
+    if not virtual and len(PATIENT_GROUPS) == 1:
         directory = (
             f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{PATIENT_GROUPS[0]}/'
+        )
+    elif not virtual:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Control vs {PATIENT_GROUPS[1]}/'
         )
     elif toy_data:
         directory = (
             f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Toy Dataset/'
         )
     elif not POP_NUMBER:
         directory = (
             f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'{"By Lab" if by_lab else "By Diagnosis"}/'
             f'{PATIENT_GROUPS[0]} '
             f'{ctrl_num} {control_combination}/'
@@ -616,6 +646,7 @@ def save_network(model: NeuralCDE, readout: type[Any], optimizer: optim.AdamW,
     else:
         directory = (
             f'Network States (VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Control vs {PATIENT_GROUPS[1]} Population {POP_NUMBER}/'
         )
 
@@ -624,26 +655,39 @@ def save_network(model: NeuralCDE, readout: type[Any], optimizer: optim.AdamW,
         os.makedirs(directory)
 
     # Set the filename for the network state_dict
-    filename = (
-        f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
-        f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
-        f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
-        f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
-        f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
-        f'{NUM_PER_PATIENT}perPatient_'
-        f'batchsize{BATCH_SIZE}_'
-        f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-        f'smoothing{LABEL_SMOOTHING}_'
-        f'dropout{DROPOUT}'
-        f'{"_byLab" if by_lab else ""}.txt'
-    ) if virtual else (
-        f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
-        f'Control_vs_{PATIENT_GROUPS[1]}_'
-        f'batchsize{BATCH_SIZE}_'
-        f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-        f'smoothing{LABEL_SMOOTHING}_'
-        f'dropout{DROPOUT}.txt'
-    )
+    if not virtual and len(PATIENT_GROUPS) == 1:
+        filename = (
+            f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+            f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+            f'batchsize{BATCH_SIZE}_'
+            f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+            f'smoothing{LABEL_SMOOTHING}_'
+            f'dropout{DROPOUT}.txt'
+        )
+    elif not virtual:
+        filename = (
+            f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+            f'Control_vs_{PATIENT_GROUPS[1]}_'
+            f'batchsize{BATCH_SIZE}_'
+            f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+            f'smoothing{LABEL_SMOOTHING}_'
+            f'dropout{DROPOUT}.txt'
+        )
+    else:
+        filename = (
+            f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+            f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+            f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
+            f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
+            f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
+            f'{NUM_PER_PATIENT}perPatient_'
+            f'batchsize{BATCH_SIZE}_'
+            f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+            f'smoothing{LABEL_SMOOTHING}_'
+            f'dropout{DROPOUT}'
+            f'{"_byLab" if by_lab else ""}.txt'
+        )
+
     # Add _setup to the filename before the .txt extension
     setup_filename = "".join([filename[:-4], "_setup", filename[-4:]])
 
