@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Wed Sep 13, 2023 | 09:51P EDT
+# Last Modified: Wed Sep 13, 2023 | 03:21P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -99,7 +99,7 @@ def train(hyperparameters: dict, virtual: bool=True,
                             else len(permutations[1])]
         )
         # Load the dataset for training
-        loader, t_steps = load_data(
+        loader, (t_steps, t_start, t_end, t_eval) = load_data(
             control_combination=control_combination,
             mdd_combination=mdd_combination, by_lab=by_lab,
             plus_ableson_mdd=plus_ableson_mdd
@@ -112,13 +112,16 @@ def train(hyperparameters: dict, virtual: bool=True,
             'mdd_combination': mdd_combination,
             'by_lab': by_lab,
             't_steps': t_steps,
+            't_start': t_start,
+            't_end': t_end,
+            't_eval': t_eval,
         }
         model = model_init(info)
         run_training(model, loader, info)
 
 
 def train_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
-    loader, t_steps = load_data(
+    loader, (t_steps, t_start, t_end, t_eval) = load_data(
         virtual, POP_NUMBER, ableson_pop=ableson_pop, toy_data=toy_data
     )
 
@@ -126,6 +129,9 @@ def train_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
         'virtual': virtual,
         'toy_data': toy_data,
         't_steps': t_steps,
+        't_start': t_start,
+        't_end': t_end,
+        't_eval': t_eval,
     }
     model = model_init(info)
     if MECHANISTIC:
@@ -212,21 +218,30 @@ def load_data(virtual: bool=True, pop_number: int=0,
         )
     if not virtual and INDIVIDUAL_NUMBER:
         t_steps = len(dataset[...,0])
+        t = dataset[0][0][...,0]
+        t_start = t[0]
+        t_end = t[-1]
     else:
         t_steps = len(dataset[0][0][...,0])
+        t = dataset[0][0][...,0]
+        t_start = t[0]
+        t_end = t[-1]
     loader = DataLoader(
         dataset=dataset, batch_size=BATCH_SIZE, shuffle=True
     )
-    return loader, t_steps
+    return loader, (t_steps, t_start, t_end, t)
 
 
 def model_init(info: dict):
     toy_data = info.get('toy_data', False)
     t_steps = info.get('t_steps', 11)
+    t_eval = info.get('t_eval', [0,1])
+
     if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
         return NeuralCDE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
-            device=DEVICE, dropout=DROPOUT
+            t_interval=t_eval.contiguous() if not CLASSIFY else torch.tensor((0,1)),
+            device=DEVICE, dropout=DROPOUT, prediction=not CLASSIFY
         ).double()
     elif NETWORK_TYPE == 'NODE':
         return NeuralODE(
@@ -369,7 +384,7 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
 def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
                         optimizer: optim.AdamW, loss_over_time: list, domain: torch.Tensor,  info: dict,
                         toy_data: bool=False):
-
+    t_eval = info.get('t_eval', [0,1])
     for j, (data, labels) in enumerate(loader):
         # Ensure we have assigned the data and labels to the correct
         #  processing device
@@ -381,11 +396,11 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             data = data[...,[0,2,3]]
         # If we are using prediction mode instead of classification, we need
         #  the data and labels to be the same
-        data = data.double().to(DEVICE)
+        data = data.double().to(DEVICE) if CLASSIFY else data[...,1:].double().to(DEVICE)
         labels = labels.to(DEVICE) if CLASSIFY else data
         coeffs = torchcde.\
             hermite_cubic_coefficients_with_backward_differences(
-                data
+                data, t=t_eval
             )
 
         # Zero the gradient from the previous data
@@ -395,7 +410,7 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         pred_y = model(coeffs).squeeze(-1)
 
         # Compute the loss based on the results
-        output = loss(pred_y, labels, dense_pred_y, domain)
+        output = loss(pred_y, labels, domain=domain)
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -443,7 +458,7 @@ def ncde_training_epoch_lbfgs(itr: int, loader: DataLoader, model: NeuralCDE,
             pred_y = model(coeffs).squeeze(-1)
 
             # Compute the loss based on the results
-            output = loss(pred_y, labels, dense_pred_y, domain)
+            output = loss(pred_y, labels, domain=domain)
 
             # This happens in place, so we don't need to return loss_over_time
             loss_over_time.append((j, output.item()))
@@ -637,7 +652,8 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
 
 
 def loss(pred_y: torch.Tensor, labels: torch.Tensor,
-         dense_pred_y: torch.Tensor | None, domain: torch.Tensor, params: dict):
+         dense_pred_y: torch.Tensor | None=None,
+         domain: torch.Tensor | None=None, params: dict={}):
     """To compute the loss with potential mechanistic components"""
     if CLASSIFY:
         return binary_cross_entropy_with_logits(pred_y, labels)

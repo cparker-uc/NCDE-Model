@@ -1,7 +1,7 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Tue Sep 12, 2023 | 08:53P EDT
+# Last Modified: Wed Sep 13, 2023 | 02:50P EDT
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
@@ -104,7 +104,7 @@ def test(hyperparameters: dict, virtual: bool=True,
                             else len(permutations[1])]
         )
         # Load the dataset for training
-        loader, t_steps = load_data(
+        loader, (t_steps, t_start, t_end) = load_data(
             control_combination=control_combination,
             mdd_combination=mdd_combination,
             patient_groups=PATIENT_GROUPS, by_lab=by_lab,
@@ -118,8 +118,10 @@ def test(hyperparameters: dict, virtual: bool=True,
             'mdd_combination': mdd_combination,
             'by_lab': by_lab,
             't_steps': t_steps,
+            't_start': t_start,
+            't_end': t_end,
         }
-        model = model_init(t_steps, info)
+        model = model_init(info)
         with torch.no_grad():
             if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
                 classification_ncde_testing(model, loader, info) if CLASSIFY else prediction_ncde_testing(model, loader, info)
@@ -137,7 +139,7 @@ def test(hyperparameters: dict, virtual: bool=True,
 def test_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
     """When we do not have a list of test patient groups, run a test on a
     single test population"""
-    loader, t_steps = load_data(
+    loader, (t_steps, t_start, t_end) = load_data(
         virtual, POP_NUMBER, patient_groups=PATIENT_GROUPS,
         ableson_pop=ableson_pop, toy_data=toy_data, test=True
     )
@@ -147,8 +149,10 @@ def test_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
         'ableson_pop': ableson_pop,
         'toy_data': toy_data,
         't_steps': t_steps,
+        't_start': t_start,
+        't_end': t_end,
     }
-    model = model_init(t_steps, info)
+    model = model_init(info)
     with torch.no_grad():
         if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
             classification_ncde_testing(model, loader, info) if CLASSIFY else prediction_ncde_testing(model, loader, info)
@@ -238,19 +242,26 @@ def load_data(virtual: bool=True, pop_number: int=0,
         )
 
     t_steps = len(dataset[0][0][...,0])
+    t = dataset[0][0][...,0]
+    t_start = t[0]
+    t_end = t[1]
     loader = DataLoader(
         dataset=dataset, batch_size=2000, shuffle=False
     )
-    return loader, t_steps
+    return loader, (t_steps, t_start, t_end)
 
 
-def model_init(t_steps: int, info: dict):
+def model_init(info: dict):
     toy_data = info.get('toy_data', False)
+    t_steps = info.get('t_steps', 11)
+    t_start = info.get('t_start', 0)
+    t_end = info.get('t_end', 1)
 
     if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
         return NeuralCDE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
-            device=DEVICE, dropout=DROPOUT
+            t_interval=torch.linspace(t_start, t_end, 1000),
+            device=DEVICE, dropout=DROPOUT, prediction=not CLASSIFY
         ).double()
     if NETWORK_TYPE == 'NODE':
         return NeuralODE(
@@ -644,7 +655,7 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
             pred_y = odeint(
                 model, y0, t_eval
             )
-            # We need to take the output_channels down to a single output, then 
+            # We need to take the output_channels down to a single output, then
             #  we only need the last value (so the value after the entire depth of
             #  the network)
             # We squeeze to remove the extraneous dimension of the output so that
@@ -1463,6 +1474,7 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                     pt = pt.double().view(1,t_steps,INPUT_CHANNELS+1)
                 data_orig = pt
                 t_eval = pt[0,:,0].view(-1)
+                dense_t_eval = torch.linspace(t_eval[0], t_eval[-1], 1000)
                 # Ensure we have assigned the data and labels to the correct
                 #  processing device
                 if CORT_ONLY:
@@ -1477,7 +1489,7 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
 
                 # Compute the forward direction of the NODE
                 pred_y = odeint(
-                    model, y0, t_eval
+                    model, y0, dense_t_eval
                 ).squeeze(-1)
 
                 if i < len(index)/2:
@@ -1486,7 +1498,8 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                     patient_id = f'MDD Patient {index[i]}'
 
                 # Graph the results
-                graph_results(pred_y, data_orig, patient_id, itr, info)
+                graph_results(pred_y, dense_t_eval, data_orig, patient_id,
+                              itr, info)
 
 
 def prediction_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
@@ -1945,7 +1958,8 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
         performance_df.to_excel(writer)
 
 
-def graph_results(pred_y: torch.Tensor, data: torch.Tensor, patient_id: str,
+def graph_results(pred_y: torch.Tensor, pred_t: torch.Tensor,
+                  data: torch.Tensor, patient_id: str,
                   save_num: int, info: dict):
     # Access the necessary variables from the info dictionary
     virtual = info.get('virtual', True)
@@ -2035,12 +2049,13 @@ def graph_results(pred_y: torch.Tensor, data: torch.Tensor, patient_id: str,
             f'{"_byLab" if by_lab else ""}_'
         )
 
-    pred_y = pred_y.view(data.size(1), data.size(2)-1)
+    # pred_y = pred_y.view(data.size(1), data.size(2)-1)
+    pred_y = pred_y.squeeze()
     fig, axes = plt.subplots(nrows=INPUT_CHANNELS, figsize=(10,10))
     for idx,ax in enumerate(range(INPUT_CHANNELS)):
         axes[ax].plot(data[...,0].squeeze(), data[...,idx+1].squeeze(), 'o', label=patient_id)
         axes[ax].plot(
-            data[...,0].squeeze(), pred_y[:,idx], label=f'Predicted y ({itr} iterations)'
+            pred_t, pred_y[:,idx], label=f'Predicted y ({itr} iterations)'
         )
         axes[ax].set(title=patient_id, xlabel='Time (normalized)', ylabel='Concentration')
         axes[ax].legend(fancybox=True, shadow=True, loc='upper right')

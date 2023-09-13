@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Tue Sep 12, 2023 | 01:31P EDT
+# Last Modified: Wed Sep 13, 2023 | 01:22P EDT
 
 import os
 import torch
@@ -52,7 +52,7 @@ class NonAugmentedDataset(Dataset):
         # We normalize the time steps, so that they are between 0
         #  and 1. Shouldn't have any impact, but it will
         #  make things somewhat cleaner
-        X_tmp[...,0] = normalize_time_series(X_tmp[...,0])
+        # X_tmp[...,0] = normalize_time_series(X_tmp[...,0])
         X = torch.cat((X, X_tmp), 0)
         y = torch.cat((y, y_tmp), 0)
         return (X, y)

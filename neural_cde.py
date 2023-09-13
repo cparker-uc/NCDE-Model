@@ -1,7 +1,7 @@
 # File Name: neural_cde.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 12:43P EDT
-# Last Modified: Wed Sep 06, 2023 | 02:00P EDT
+# Last Modified: Wed Sep 13, 2023 | 03:17P EDT
 
 """Classes for implementation of Neural CDE networks"""
 
@@ -23,8 +23,8 @@ class CDEFunc(torch.nn.Module):
         self.linear1 = torch.nn.Linear(hidden_channels, 128).to(device)
         self.linear2 = torch.nn.Linear(128, hidden_channels*input_channels).to(device)
 
-        nn.init.trunc_normal_(self.linear1.weight, mean=0, std=np.sqrt(2/(hidden_channels*2)))
-        nn.init.trunc_normal_(self.linear2.weight, mean=0, std=np.sqrt(2/(hidden_channels*2)))
+        nn.init.xavier_normal_(self.linear1.weight)
+        nn.init.xavier_normal_(self.linear2.weight)
 
     def forward(self, t, z):
         """t is passed as an argument by the solver, but it is unused in most
@@ -51,7 +51,8 @@ class NeuralCDE(torch.nn.Module):
                  output_channels: int,
                  t_interval: torch.Tensor=torch.tensor((0,1), dtype=float),
                  device: torch.device=torch.device('cpu'),
-                 interpolation: str='cubic', dropout: float=0.):
+                 interpolation: str='cubic', dropout: float=0.,
+                 prediction: bool=False):
         super().__init__()
 
         self.func = CDEFunc(input_channels, hidden_channels, device)
@@ -68,7 +69,13 @@ class NeuralCDE(torch.nn.Module):
         self.readout = torch.nn.Linear(hidden_channels, output_channels).to(device)
 
         self.interpolation = interpolation
-        self.t_interval = t_interval.to(device)
+        # This flag tells us whether we want only the last point of the
+        #  integration or all of the points along the way
+        self.prediction = prediction
+        if self.prediction:
+            self.t_interval = t_interval.to(device)
+        else:
+            self.t_interval = torch.tensor((0,1), dtype=float)
 
     def forward(self, coeffs):
         """coeffs is the coefficients that describe the spline between the
@@ -99,7 +106,8 @@ class NeuralCDE(torch.nn.Module):
         )
         # cdeint returns the initial value and terminal value from the
         #  integration, we only need the terminal
-        z_T = z_T[:,1]
+        if not self.prediction:
+            z_T = z_T[:,1]
 
         # Convert z_T to y with the readout linear map
         pred_y = self.readout(z_T)
