@@ -1,7 +1,7 @@
 # File Name: neural_ode.py
 # Author: Christopher Parker
 # Created: Mon Aug 14, 2023 | 11:02P EDT
-# Last Modified: Tue Sep 12, 2023 | 02:26P EDT
+# Last Modified: Tue Sep 12, 2023 | 02:32P EDT
 
 """Contains the class for running NODE training"""
 
@@ -41,7 +41,8 @@ class NeuralODE(nn.Module):
 
         for m in self.net.modules():
             if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, mean=0., std=np.sqrt(2/(hdim*2)))
+                nn.init.xavier_normal_(m.weight)
+                # nn.init.normal_(m.weight, mean=0., std=np.sqrt(2/(hdim*2)))
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, t, y):

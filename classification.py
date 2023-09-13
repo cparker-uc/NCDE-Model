@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Tue Sep 12, 2023 | 02:22P EDT
+# Last Modified: Wed Sep 13, 2023 | 09:53P EDT
 
 "Root file for classification of augmented TSST or simulation data"
 
@@ -11,33 +11,33 @@ NETWORK_TYPE = 'NODE' # NCDE, NODE, ANN or RNN
 # If using NCDE, should be the number of vars plus 1, since we include time
 # If using NODE, should just be the number of vars
 INPUT_CHANNELS = 2
-HDIM = 32
+HDIM = 16
 # Needs to be 2 for NODE (even though it will be run through readout to combine down to 1)
 OUTPUT_CHANNELS = 2
 # Only necessary for RNN
 N_RECURS = 3
 CLASSIFY = False
-MECHANISTIC = False
+MECHANISTIC = True
 
 # Training hyperparameters
-ITERS = 5000
-SAVE_FREQ = 1000
-LR = 3e-3
+ITERS = 200
+SAVE_FREQ = 10
+LR = 1e-3
 DECAY = 0.
 OPT_RESET = 200
 ATOL = 1e-8
 RTOL = 1e-6
 
 # Training data selection parameters
-POP = 'nelsononly'
+POP = 'toydata'
 PATIENT_GROUPS = ['Control'] # Only necessary for POP='NelsonOnly'
-INDIVIDUAL_NUMBER = 1
+INDIVIDUAL_NUMBER = 0
 METHOD = 'Uniform'
-NORMALIZE_STANDARDIZE = 'StandardizeAll'
+NORMALIZE_STANDARDIZE = 'Standardize'
 NOISE_MAGNITUDE = 0.05
 NUM_PER_PATIENT = 100
 POP_NUMBER = 0
-BATCH_SIZE = 1
+BATCH_SIZE = 10
 LABEL_SMOOTHING = 0
 DROPOUT = 0.5
 CORT_ONLY = False
@@ -48,7 +48,7 @@ CTRL_RANGE = list(range(11))
 MDD_RANGE = list(range(12))
 
 # End time for use with toy dataset (2.35 hours, 10 hours or 24 hours)
-T_END = 2.35
+T_END = 24
 
 
 import sys
@@ -156,43 +156,42 @@ if __name__ == "__main__":
 
     try:
         if sys.argv[1].lower() == 'train':
-            for INDIVIDUAL_NUMBER in range(1,16):
-                train(
-                    hyperparameters={
-                        'NETWORK_TYPE': NETWORK_TYPE,
-                        'INPUT_CHANNELS': INPUT_CHANNELS,
-                        'HDIM': HDIM,
-                        'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
-                        'N_RECURS': N_RECURS,
-                        'CLASSIFY': CLASSIFY,
-                        'MECHANISTIC': MECHANISTIC,
-                        'ITERS': ITERS,
-                        'SAVE_FREQ': SAVE_FREQ,
-                        'LR': LR,
-                        'DECAY': DECAY,
-                        'OPT_RESET': OPT_RESET,
-                        'ATOL': ATOL,
-                        'RTOL': RTOL,
-                        'PATIENT_GROUPS': patient_groups,
-                        'INDIVIDUAL_NUMBER': INDIVIDUAL_NUMBER,
-                        'METHOD': METHOD,
-                        'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
-                        'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
-                        'NUM_PER_PATIENT': NUM_PER_PATIENT,
-                        'POP_NUMBER': POP_NUMBER,
-                        'BATCH_SIZE': BATCH_SIZE,
-                        'LABEL_SMOOTHING': LABEL_SMOOTHING,
-                        'DROPOUT': DROPOUT,
-                        'CORT_ONLY': CORT_ONLY,
-                        'T_END': T_END
-                    },
-                    virtual=False,
-                    # permutations=perms,
-                    # ctrl_range=CTRL_RANGE,
-                    # mdd_range=MDD_RANGE,
-                    plus_ableson_mdd=True if POP.lower()=='plusablesonmdd0and12' else False,
-                    toy_data=True if POP.lower()=='toydata' else False
-                )
+            train(
+                hyperparameters={
+                    'NETWORK_TYPE': NETWORK_TYPE,
+                    'INPUT_CHANNELS': INPUT_CHANNELS,
+                    'HDIM': HDIM,
+                    'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
+                    'N_RECURS': N_RECURS,
+                    'CLASSIFY': CLASSIFY,
+                    'MECHANISTIC': MECHANISTIC,
+                    'ITERS': ITERS,
+                    'SAVE_FREQ': SAVE_FREQ,
+                    'LR': LR,
+                    'DECAY': DECAY,
+                    'OPT_RESET': OPT_RESET,
+                    'ATOL': ATOL,
+                    'RTOL': RTOL,
+                    'PATIENT_GROUPS': patient_groups,
+                    'INDIVIDUAL_NUMBER': INDIVIDUAL_NUMBER,
+                    'METHOD': METHOD,
+                    'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
+                    'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
+                    'NUM_PER_PATIENT': NUM_PER_PATIENT,
+                    'POP_NUMBER': POP_NUMBER,
+                    'BATCH_SIZE': BATCH_SIZE,
+                    'LABEL_SMOOTHING': LABEL_SMOOTHING,
+                    'DROPOUT': DROPOUT,
+                    'CORT_ONLY': CORT_ONLY,
+                    'T_END': T_END
+                },
+                virtual=True,
+                # permutations=perms,
+                # ctrl_range=CTRL_RANGE,
+                # mdd_range=MDD_RANGE,
+                plus_ableson_mdd=True if POP.lower()=='plusablesonmdd0and12' else False,
+                toy_data=True if POP.lower()=='toydata' else False
+            )
         elif sys.argv[1].lower() == 'test':
             test(
                 hyperparameters={
@@ -224,7 +223,7 @@ if __name__ == "__main__":
                     'MAX_ITR': ITERS,
                     'T_END': T_END
                 },
-                virtual=False,
+                virtual=True,
                 # permutations=perms,
                 # ctrl_range=CTRL_RANGE,
                 # mdd_range=MDD_RANGE,
