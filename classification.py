@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Thu Sep 14, 2023 | 09:19P EDT
+# Last Modified: Thu Sep 14, 2023 | 01:44P EDT
 
 "Root file for classification of augmented TSST or simulation data"
 
@@ -20,7 +20,7 @@ CLASSIFY = False
 MECHANISTIC = True
 
 # Training hyperparameters
-ITERS = 1000
+ITERS = 400
 SAVE_FREQ = 100
 LR = 3e-3
 DECAY = 0.
@@ -60,7 +60,7 @@ from testing import test
 
 
 # Define the device with which to train networks
-DEVICE = torch.device('cuda')
+DEVICE = torch.device('cpu')
 
 # These are the permutations of test patients selected from each group 
 #  (hard-coded for reproducibility and easy reference)

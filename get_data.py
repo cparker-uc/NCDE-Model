@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Wed Sep 13, 2023 | 08:53P EDT
+# Last Modified: Thu Sep 14, 2023 | 02:37P EDT
 
 import os
 import torch
@@ -69,6 +69,8 @@ class NonAugmentedDataset(Dataset):
         """This function takes the unmodified data and normalizes or
         standardizes it based on the option selected, then returns it in the
         proper format"""
+        if self.sim:
+            return standardize_sriram_data(X)
         match self.normalize_standardize:
             # We break X down into columns, pass them to the relevant func
             #  then cat it back together along axis=2 (columns)
@@ -245,6 +247,50 @@ def standardize_nelson_data(X: torch.Tensor):
         series -= CORTmean
         series /= CORTstd
     return X
+
+
+def standardize_sriram_data(X: torch.Tensor):
+    """Standardize the ACTH and CORT of Nelson patients with the mean and std
+    of all patients in the dataset"""
+    # CRHmean = torch.tensor(0.7646, dtype=float)
+    # ACTHmean = torch.tensor(4.6248, dtype=float)
+    # CORTmean = torch.tensor(11.2867, dtype=float)
+    # GRmean = torch.tensor(2.4473, dtype=float)
+    # CRHstd = torch.tensor(0.5680, dtype=float)
+    # ACTHstd = torch.tensor(3.6620, dtype=float)
+    # CORTstd = torch.tensor(7.6905, dtype=float)
+    # GRstd = torch.tensor(0.3119, dtype=float)
+    # for series in X[...,1]:
+    #     series -= CRHmean
+    #     series /= CRHstd
+    # for series in X[...,2]:
+    #     series -= ACTHmean
+    #     series /= ACTHstd
+    # for series in X[...,3]:
+    #     series -= CORTmean
+    #     series /= CORTstd
+    # for series in X[...,4]:
+    #     series -= GRmean
+    #     series /= GRstd
+    # return X
+    CRHmean = torch.tensor(0.5211, dtype=float)
+    ACTHmean = torch.tensor(6.5110, dtype=float)
+    CORTmean = torch.tensor(16.4809, dtype=float)
+    GRmean = torch.tensor(1.6901, dtype=float)
+    CRHstd = torch.tensor(0.5680, dtype=float)
+    ACTHstd = torch.tensor(3.6620, dtype=float)
+    CORTstd = torch.tensor(7.6905, dtype=float)
+    GRstd = torch.tensor(0.3119, dtype=float)
+    X = X.squeeze()
+    X[...,1] = X[...,1] - CRHmean
+    X[...,1] = X[...,1]/CRHstd
+    X[...,2] = X[...,2] - ACTHmean
+    X[...,2] = X[...,2]/ACTHstd
+    X[...,3] = X[...,3] - CORTmean
+    X[...,3] = X[...,3]/CORTstd
+    X[...,4] = X[...,4] - GRmean
+    X[...,4] = X[...,4]/GRstd
+    return X.view(1, 20, 5)
 
 
 def normalize_data(X: torch.Tensor):

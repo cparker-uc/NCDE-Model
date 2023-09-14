@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Thu Sep 14, 2023 | 10:16P EDT
+# Last Modified: Thu Sep 14, 2023 | 02:19P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
