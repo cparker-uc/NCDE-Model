@@ -1,7 +1,7 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Wed Sep 13, 2023 | 08:28P EDT
+# Last Modified: Thu Sep 14, 2023 | 10:08P EDT
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
@@ -23,7 +23,7 @@ from neural_cde import NeuralCDE
 from neural_ode import NeuralODE
 from ann import ANN
 from rnn import RNN
-from get_data import NelsonData, AblesonData
+from get_data import NelsonData, AblesonData, SriramSimulation
 from get_augmented_data import (FullVirtualPopulation,
                                 FullVirtualPopulation_ByLab,
                                 NelsonVirtualPopulation, ToyDataset)
@@ -176,7 +176,12 @@ def load_data(virtual: bool=True, pop_number: int=0,
               toy_data: bool=False, test: bool=True):
     if not patient_groups:
         patient_groups = PATIENT_GROUPS
-    if not virtual:
+    if toy_data and not virtual:
+        dataset = SriramSimulation(
+            patient_groups=patient_groups,
+            normalize_standardize=NORMALIZE_STANDARDIZE
+        )
+    elif not virtual:
         dataset = NelsonData(
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE,
@@ -242,10 +247,10 @@ def load_data(virtual: bool=True, pop_number: int=0,
             label_smoothing=LABEL_SMOOTHING
         )
 
-    t_steps = len(dataset[0][0][...,0])
+    t_steps = len(dataset[0][0][...,0].squeeze())
     t = dataset[0][0][...,0]
     t_start = t[0]
-    t_end = t[1]
+    t_end = t[-1]
     loader = DataLoader(
         dataset=dataset, batch_size=2000, shuffle=False
     )
@@ -1229,7 +1234,6 @@ def prediction_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     # Loop over the state dictionaries based on the number of iterations, from
     #  100 to MAX_ITR*100
     n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
-    print(f"{n_saves=}")
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
         if virtual:
@@ -1329,6 +1333,9 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     toy_data = info.get('toy_data', False)
     t_steps = info.get('t_steps', 11)
 
+    # Initialize the parameters if we are doing mechanistic loss
+    param_init(model)
+
     # Set up the index numbers to match the patient numbers of the test
     #  patients (or just 1-5 for Control and the same for MDD if no test
     #  combinations)
@@ -1336,6 +1343,8 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
         index = control_combination+mdd_combination
     elif ableson_pop:
         index = [i for i in range(50)]
+    elif toy_data and len(PATIENT_GROUPS) == 1:
+        index = [i for i in range(1000)]
     elif toy_data:
         index = [i for i in range(2000)]
     elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
@@ -1351,6 +1360,8 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                 t = PATIENT_GROUPS[0] + ' ' +  str(entry)
             else:
                 t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif toy_data and len(PATIENT_GROUPS) == 1:
+            t = PATIENT_GROUPS[0] + ' ' + str(entry)
         elif toy_data:
             if i < 1000:
                 t = PATIENT_GROUPS[0] + ' ' + str(entry)
@@ -1446,6 +1457,15 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                 f'smoothing{LABEL_SMOOTHING}_'
                 f'dropout{DROPOUT}.txt'
             )
+        elif len(PATIENT_GROUPS) == 1:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
         else:
             state_file = (
                 f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
@@ -1473,9 +1493,11 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
             for i, pt in enumerate(data):
                 if INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
                     pt = pt.double().view(1,t_steps,INPUT_CHANNELS+1)
+                elif toy_data and not virtual:
+                    pt = pt.double().view(1, t_steps, INPUT_CHANNELS+1)
                 data_orig = pt
                 t_eval = pt[0,:,0].view(-1)
-                dense_t_eval = torch.linspace(t_eval[0], t_eval[-1], 1000)
+                dense_t_eval = torch.linspace(t_eval[0], t_eval[-1], 1000, dtype=torch.float64)
                 # Ensure we have assigned the data and labels to the correct
                 #  processing device
                 if CORT_ONLY:
@@ -1873,6 +1895,59 @@ def prediction_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
 
                 # Graph the results
                 graph_results(pred_y, data_orig, patient_id, itr, info)
+
+
+def param_init(model: nn.Module):
+    """Initialize the parameters for the mechanistic loss, and set them to
+    require gradient"""
+    k_stress = torch.nn.Parameter(torch.tensor(13.7), requires_grad=True)
+    Ki = torch.nn.Parameter(torch.tensor(1.6), requires_grad=True)
+    VS3 = torch.nn.Parameter(torch.tensor(3.25), requires_grad=True)
+    Km1 = torch.nn.Parameter(torch.tensor(1.74), requires_grad=True)
+    KP2 = torch.nn.Parameter(torch.tensor(8.3), requires_grad=True)
+    VS4 = torch.nn.Parameter(torch.tensor(0.907), requires_grad=False)
+    Km2 = torch.nn.Parameter(torch.tensor(0.112), requires_grad=False)
+    KP3 = torch.nn.Parameter(torch.tensor(0.945), requires_grad=False)
+    VS5 = torch.nn.Parameter(torch.tensor(0.00535), requires_grad=False)
+    Km3 = torch.nn.Parameter(torch.tensor(0.0768), requires_grad=False)
+    Kd1 = torch.nn.Parameter(torch.tensor(0.00379), requires_grad=False)
+    Kd2 = torch.nn.Parameter(torch.tensor(0.00916), requires_grad=False)
+    Kd3 = torch.nn.Parameter(torch.tensor(0.356), requires_grad=False)
+    n1 = torch.nn.Parameter(torch.tensor(5.43), requires_grad=True)
+    n2 = torch.nn.Parameter(torch.tensor(5.1), requires_grad=True)
+    Kb = torch.nn.Parameter(torch.tensor(0.0202), requires_grad=True)
+    Gtot = torch.nn.Parameter(torch.tensor(3.28), requires_grad=True)
+    VS2 = torch.nn.Parameter(torch.tensor(0.0509), requires_grad=True)
+    K1 = torch.nn.Parameter(torch.tensor(0.645), requires_grad=True)
+    Kd5 = torch.nn.Parameter(torch.tensor(0.0854), requires_grad=True)
+
+    params = {
+        'k_stress': k_stress,
+        'Ki': Ki,
+        'VS3': VS3,
+        'Km1': Km1,
+        'KP2': KP2,
+        'VS4': VS4,
+        'Km2': Km2,
+        'KP3': KP3,
+        'VS5': VS5,
+        'Km3': Km3,
+        'Kd1': Kd1,
+        'Kd2': Kd2,
+        'Kd3': Kd3,
+        'n1': n1,
+        'n2': n2,
+        'Kb': Kb,
+        'Gtot': Gtot,
+        'VS2': VS2,
+        'K1': K1,
+        'Kd5': Kd5
+    }
+
+    for key, val in params.items():
+        model.register_parameter(key, val)
+
+    return params
 
 
 def loss(pred_y, labels):

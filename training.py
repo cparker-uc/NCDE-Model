@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Wed Sep 13, 2023 | 08:57P EDT
+# Last Modified: Thu Sep 14, 2023 | 10:16P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -116,6 +116,7 @@ def train(hyperparameters: dict, virtual: bool=True,
             't_end': t_end,
             't_eval': t_eval,
         }
+
         model = model_init(info)
         run_training(model, loader, info)
 
@@ -135,7 +136,7 @@ def train_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
     }
     model = model_init(info)
     if MECHANISTIC:
-        params = param_init()
+        params = param_init(model)
         for key, val in params.items():
             model.register_parameter(key, val)
     else:
@@ -269,32 +270,55 @@ def model_init(info: dict):
         raise ValueError("NETWORK_TYPE must be one of NCDE, NCDE_LBFGS, NODE, ANN or RNN")
 
 
-def param_init():
+def param_init(model: nn.Module):
     """Initialize the parameters for the mechanistic loss, and set them to
     require gradient"""
-    KP2 = torch.nn.Parameter(torch.tensor(8.3), requires_grad=False)
+    k_stress = torch.nn.Parameter(torch.tensor(13.7), requires_grad=True)
     Ki = torch.nn.Parameter(torch.tensor(1.6), requires_grad=True)
-    n2 = torch.nn.Parameter(torch.tensor(5.1), requires_grad=False)
+    VS3 = torch.nn.Parameter(torch.tensor(3.25), requires_grad=False)
+    Km1 = torch.nn.Parameter(torch.tensor(1.74), requires_grad=False)
+    KP2 = torch.nn.Parameter(torch.tensor(8.3), requires_grad=False)
     VS4 = torch.nn.Parameter(torch.tensor(0.907), requires_grad=False)
     Km2 = torch.nn.Parameter(torch.tensor(0.112), requires_grad=False)
-    Kd2 = torch.nn.Parameter(torch.tensor(0.00916), requires_grad=False)
     KP3 = torch.nn.Parameter(torch.tensor(0.945), requires_grad=False)
     VS5 = torch.nn.Parameter(torch.tensor(0.00535), requires_grad=False)
     Km3 = torch.nn.Parameter(torch.tensor(0.0768), requires_grad=False)
+    Kd1 = torch.nn.Parameter(torch.tensor(0.00379), requires_grad=False)
+    Kd2 = torch.nn.Parameter(torch.tensor(0.00916), requires_grad=False)
     Kd3 = torch.nn.Parameter(torch.tensor(0.356), requires_grad=False)
+    n1 = torch.nn.Parameter(torch.tensor(5.43), requires_grad=True)
+    n2 = torch.nn.Parameter(torch.tensor(5.1), requires_grad=True)
+    Kb = torch.nn.Parameter(torch.tensor(0.0202), requires_grad=True)
+    Gtot = torch.nn.Parameter(torch.tensor(3.28), requires_grad=True)
+    VS2 = torch.nn.Parameter(torch.tensor(0.0509), requires_grad=True)
+    K1 = torch.nn.Parameter(torch.tensor(0.645), requires_grad=True)
+    Kd5 = torch.nn.Parameter(torch.tensor(0.0854), requires_grad=True)
 
     params = {
-        'KP2': KP2,
+        'k_stress': k_stress,
         'Ki': Ki,
-        'n2': n2,
+        'VS3': VS3,
+        'Km1': Km1,
+        'KP2': KP2,
         'VS4': VS4,
         'Km2': Km2,
-        'Kd2': Kd2,
         'KP3': KP3,
         'VS5': VS5,
         'Km3': Km3,
+        'Kd1': Kd1,
+        'Kd2': Kd2,
         'Kd3': Kd3,
+        'n1': n1,
+        'n2': n2,
+        'Kb': Kb,
+        'Gtot': Gtot,
+        'VS2': VS2,
+        'K1': K1,
+        'Kd5': Kd5
     }
+    for key, val in params.items():
+        model.register_parameter(key, val)
+
     return params
 
 
@@ -308,11 +332,13 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
 
     # For use with mechanistic loss, we need the gradient with respect to time
     #  so we create a linspace and set requires_grad to True
-    domain = torch.linspace(0, 1, 100, requires_grad=True)
+    domain = torch.linspace(0, 1, 50, requires_grad=True)
 
     # Print which population we are using to train
     if not virtual and INDIVIDUAL_NUMBER:
         print(f'Starting Training w/ {PATIENT_GROUPS[0]} #{INDIVIDUAL_NUMBER}')
+    elif not virtual and len(PATIENT_GROUPS) == 1:
+        print(f'Starting Training w/ {PATIENT_GROUPS[0]}')
     elif not virtual:
         print(f'Starting Training w/ {PATIENT_GROUPS[0]} '
               f'vs {PATIENT_GROUPS[1]}')
@@ -702,9 +728,23 @@ def mechanistic_loss(dense_pred_y: torch.Tensor, domain: torch.Tensor,
         retain_graph=True,
         create_graph=True
     )[0]
+    pred_dy[:,2] = torch.autograd.grad(
+        dense_pred_y[...,2], domain,
+        grad_outputs=torch.ones_like(domain),
+        retain_graph=True,
+        create_graph=True
+    )[0]
+    pred_dy[:,3] = torch.autograd.grad(
+        dense_pred_y[...,3], domain,
+        grad_outputs=torch.ones_like(domain),
+        retain_graph=True,
+        create_graph=True
+    )[0]
     mechanistic_dy = torch.zeros_like(dense_pred_y)
-    mechanistic_dy[...,0] = params['KP2']*stress(domain)*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(dense_pred_y[...,1])*(torch.abs(dense_pred_y[...,1])**params['n2']))) - params['VS4']*(dense_pred_y[...,0]/(params['Km2'] + dense_pred_y[...,0])) - params['Kd2']*dense_pred_y[...,0]
-    mechanistic_dy[...,1] = params['KP3']*dense_pred_y[...,0] - params['VS5']*(dense_pred_y[...,1]/(params['Km3'] + dense_pred_y[...,1])) - params['Kd3']*dense_pred_y[...,1]
+    mechanistic_dy[...,0] = params['k_stress']*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n2']))) - params['VS3']*(dense_pred_y[...,0]/(params['Km1'] + dense_pred_y[...,0])) - params['Kd1']*dense_pred_y[...,0]
+    mechanistic_dy[...,1] = params['KP2']*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n2']))) - params['VS4']*(dense_pred_y[...,1]/(params['Km2'] + dense_pred_y[...,1])) - params['Kd2']*dense_pred_y[...,0]
+    mechanistic_dy[...,2] = params['KP3']*dense_pred_y[...,0] - params['VS5']*(dense_pred_y[...,2]/(params['Km3'] + dense_pred_y[...,2])) - params['Kd3']*dense_pred_y[...,1]
+    mechanistic_dy[...,3] = params['Kb']*dense_pred_y[...,2]*(params['Gtot'] - dense_pred_y[...,3]) + params['VS2']*((dense_pred_y[...,3]**params['n1'])/(params['K1']**params['n1'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n1']))) - params['Kd5']*dense_pred_y[...,3]
     return mse_loss(pred_dy, mechanistic_dy)
 
 

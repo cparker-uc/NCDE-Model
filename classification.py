@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Wed Sep 13, 2023 | 08:49P EDT
+# Last Modified: Thu Sep 14, 2023 | 09:19P EDT
 
 "Root file for classification of augmented TSST or simulation data"
 
@@ -10,10 +10,10 @@ NETWORK_TYPE = 'NODE' # NCDE, NODE, ANN or RNN
 # Should be 40 for Toy dataset or 22 for others if using ANN or RNN
 # If using NCDE, should be the number of vars plus 1, since we include time
 # If using NODE, should just be the number of vars
-INPUT_CHANNELS = 2
+INPUT_CHANNELS = 4
 HDIM = 16
 # Needs to be 2 for NODE (even though it will be run through readout to combine down to 1)
-OUTPUT_CHANNELS = 2
+OUTPUT_CHANNELS = 4
 # Only necessary for RNN
 N_RECURS = 3
 CLASSIFY = False
@@ -31,7 +31,7 @@ RTOL = 1e-6
 # Training data selection parameters
 POP = 'toydata'
 PATIENT_GROUPS = ['Control'] # Only necessary for POP='NelsonOnly'
-INDIVIDUAL_NUMBER = 1
+INDIVIDUAL_NUMBER = 0
 METHOD = 'Uniform'
 NORMALIZE_STANDARDIZE = None
 NOISE_MAGNITUDE = 0.05
