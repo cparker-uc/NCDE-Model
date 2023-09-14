@@ -1,7 +1,7 @@
 # File Name: get_augmented_data.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 03:19P EDT
-# Last Modified: Fri Aug 11, 2023 | 10:12P EDT
+# Last Modified: Wed Sep 13, 2023 | 08:31P EDT
 
 """Loads the datasets that have been augmented with noise to create virtual
 patients"""
@@ -237,7 +237,8 @@ class FullVirtualPopulation_ByLab(BaseVirtualPopulation):
 
 
 class ToyDataset(BaseVirtualPopulation):
-    def __init__(self, test, noise_magnitude=0.05, method='Uniform',
+    def __init__(self, test, patient_groups=['Control', 'Atypical'],
+                 noise_magnitude=0.05, method='Uniform',
                  num_per_patient=1000, normalize_standardize='None',
                  t_end=24):
         super().__init__(method, normalize_standardize, num_per_patient,
@@ -248,13 +249,13 @@ class ToyDataset(BaseVirtualPopulation):
             'Atypical': (2, 1)
         }
 
-        self.num_patients = (1, 1)
+        self.num_patients = (1, 1) if len(patient_groups)==2 else (1,)
 
         self.toy_data = True
         self.X = torch.zeros(0, 20, 5)
         self.t_end = t_end
 
-        for group in ['Control', 'Atypical']:
+        for group in patient_groups:
             (self.X, self.y) = self.load_group(
                 group, self.group_info[group][1],
                 self.X, self.y, test

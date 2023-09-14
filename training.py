@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Wed Sep 13, 2023 | 03:21P EDT
+# Last Modified: Wed Sep 13, 2023 | 08:57P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -22,7 +22,7 @@ from neural_cde import NeuralCDE
 from neural_ode import NeuralODE
 from ann import ANN
 from rnn import RNN
-from get_data import AblesonData, NelsonData
+from get_data import AblesonData, NelsonData, SriramSimulation
 from get_augmented_data import (FullVirtualPopulation,
                                 FullVirtualPopulation_ByLab,
                                 NelsonVirtualPopulation, ToyDataset)
@@ -151,7 +151,12 @@ def load_data(virtual: bool=True, pop_number: int=0,
               toy_data: bool=False):
     if not patient_groups:
         patient_groups = PATIENT_GROUPS
-    if not virtual:
+    if toy_data and not virtual:
+        dataset = SriramSimulation(
+            patient_groups=patient_groups,
+            normalize_standardize=NORMALIZE_STANDARDIZE
+        )
+    elif not virtual:
         dataset = NelsonData(
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE,
@@ -163,6 +168,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
     elif toy_data:
         dataset = ToyDataset(
             test=test,
+            patient_groups=PATIENT_GROUPS,
             noise_magnitude=NOISE_MAGNITUDE,
             method=METHOD,
             normalize_standardize=NORMALIZE_STANDARDIZE,
@@ -267,7 +273,7 @@ def param_init():
     """Initialize the parameters for the mechanistic loss, and set them to
     require gradient"""
     KP2 = torch.nn.Parameter(torch.tensor(8.3), requires_grad=False)
-    Ki = torch.nn.Parameter(torch.tensor(1.6), requires_grad=False)
+    Ki = torch.nn.Parameter(torch.tensor(1.6), requires_grad=True)
     n2 = torch.nn.Parameter(torch.tensor(5.1), requires_grad=False)
     VS4 = torch.nn.Parameter(torch.tensor(0.907), requires_grad=False)
     Km2 = torch.nn.Parameter(torch.tensor(0.112), requires_grad=False)
@@ -313,6 +319,8 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
     elif POP_NUMBER:
         print(f'Starting Training w/ {PATIENT_GROUPS[1]} '
               f'Population Number {POP_NUMBER}')
+    elif len(PATIENT_GROUPS) == 1:
+        print(f'Starting Training w/ {PATIENT_GROUPS[0]}')
     else:
         print(f'Starting Training w/ {PATIENT_GROUPS[0]} {control_combination}'
               f' vs {PATIENT_GROUPS[1]} {mdd_combination}')
@@ -484,7 +492,10 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
                         readout: nn.Linear, optimizer: optim.AdamW,
                         loss_over_time: list, domain: torch.Tensor, params: dict,
                         info: dict, toy_data: bool=False):
+    virtual = info.get('virtual', True)
     for j, (data, labels) in enumerate(loader):
+        if toy_data and not virtual:
+            data = data.squeeze(0)
         t_eval = data[0,:,0].view(-1)
 
         # Ensure we have assigned the data and labels to the correct
@@ -699,7 +710,7 @@ def mechanistic_loss(dense_pred_y: torch.Tensor, domain: torch.Tensor,
 
 def stress(domain):
     """Placeholder for adding stress to the system"""
-    return 1
+    return 5
 
 
 def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,

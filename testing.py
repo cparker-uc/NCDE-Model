@@ -1,7 +1,7 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Wed Sep 13, 2023 | 02:50P EDT
+# Last Modified: Wed Sep 13, 2023 | 08:28P EDT
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
@@ -188,6 +188,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
     elif toy_data:
         dataset = ToyDataset(
             test=test,
+            patient_groups=PATIENT_GROUPS,
             noise_magnitude=NOISE_MAGNITUDE,
             method=METHOD,
             normalize_standardize=NORMALIZE_STANDARDIZE,

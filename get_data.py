@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Wed Sep 13, 2023 | 01:22P EDT
+# Last Modified: Wed Sep 13, 2023 | 08:53P EDT
 
 import os
 import torch
@@ -24,6 +24,8 @@ class NonAugmentedDataset(Dataset):
         # To be set in the child class
         self.group_info = {}
         self.patient_groups = []
+        self.individual_number = 0
+        self.sim = False
 
         # self.X contains 11 time points with 3 input channels
         #  (time, ACTH, CORT) for each time
@@ -41,14 +43,20 @@ class NonAugmentedDataset(Dataset):
         onto the X and y tensors passed to this function. This iteratively
         builds the data and label tensors as the function is called for each
         patient group requested"""
-        X_tmp = torch.zeros((len, 11, 3))
+        X_tmp = torch.zeros((len, 11, 3)) if not self.sim else torch.zeros((len, 20, 5))
         y_tmp = torch.zeros((len,)) if label==0 else torch.ones((len,))
-        for idx in range(len):
+        if self.sim:
             data_path = os.path.join(
-                self.data_dir, f'{group}Patient{idx+1}.txt'
+                'Virtual Populations', f'Toy_{group}_NoNoise_{self.normalize_standardize}_1_24hr_test.txt'
             )
-            data = np.genfromtxt(data_path)
-            X_tmp[idx,...] = torch.from_numpy(data)
+            X_tmp[0,...] = torch.load(data_path)
+        else:
+            for idx in range(len):
+                data_path = os.path.join(
+                    self.data_dir, f'{group}Patient{idx+1}.txt'
+                )
+                data = np.genfromtxt(data_path)
+                X_tmp[idx,...] = torch.from_numpy(data)
         # We normalize the time steps, so that they are between 0
         #  and 1. Shouldn't have any impact, but it will
         #  make things somewhat cleaner
@@ -89,6 +97,8 @@ class NonAugmentedDataset(Dataset):
     def __getitem__(self, idx: int):
         "Get the requested patient data and label for index idx"
         if self.individual_number and len(self.patient_groups) == 1:
+            return self.X, self.y
+        if self.sim and len(self.patient_groups) == 1:
             return self.X, self.y
         return self.X[idx,...], self.y[idx]
 
@@ -156,6 +166,43 @@ class AblesonData(NonAugmentedDataset):
                 X=self.X, y=self.y
             )
         self.X = self.norm_data(self.X)
+
+
+class SriramSimulation(NonAugmentedDataset):
+    """This class loads the original Nelson TSST data, with no
+    virtual patients included"""
+    def __init__(self, patient_groups: list[str],
+                 normalize_standardize: str,
+                 data_dir: str='Nelson TSST Individual Patient Data'):
+        super().__init__(data_dir, normalize_standardize)
+
+        # Length and label for each patient group in the dataset
+        self.group_info = {
+            'Control': [1, 0],
+            'Melancholic': [1, 1],
+            'Atypical': [1, 1],
+            'Neither': [1, 1]
+        }
+        self.patient_groups = patient_groups
+        self.sim = True
+
+        # self.X contains 20 time points with 5 input channels
+        #  (time, ACTH, CORT) for each time
+        self.X = torch.zeros((0, 20, 5))
+        # self.y indicates whether the patient was diagnosed with MDD
+        self.y = torch.zeros((0,))
+
+        # Loop through the patient groups calling self.load_group
+        for group in self.patient_groups:
+            (self.X, self.y) = self.load_group(
+                len=self.group_info[group][0],
+                group=group,
+                label=self.group_info[group][1],
+                X=self.X, y=self.y
+            )
+
+        self.X = self.norm_data(self.X)
+
 
 
 def normalize_time_series(series_tensor):

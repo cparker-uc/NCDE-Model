@@ -1,7 +1,7 @@
 # File Name: toy_dataset.py
 # Author: Christopher Parker
 # Created: Tue Aug 01, 2023 | 10:09P EDT
-# Last Modified: Wed Sep 06, 2023 | 11:14P EDT
+# Last Modified: Wed Sep 13, 2023 | 08:54P EDT
 
 """Creates a toy dataset for use in validation of the NCDE architecture.
 Apologies for the haphazard nature of the code, it was done quickly and
@@ -26,7 +26,7 @@ def func(params, y0):
         dy[3] = K_b*y[2]*(G_tot - y[3]) + V_S2*(y[3]**n1/(K1**n1 + y[3]**n1)) \
             - K_d5*y[3]
         return dy
-    t_eval = torch.linspace(0,2.35,20)
+    t_eval = torch.linspace(0,24,20)
     gflow = odeint(ode_rhs, y0, t_eval)
     gflow = torch.from_numpy(gflow)
     return torch.cat((t_eval.view(20,1), gflow), 1)
@@ -46,11 +46,13 @@ def generate_dataset():
     # mdd_gflow = torch.from_numpy(mdd_gflow)
 
     noise = 0.50
-    t_end = 2.35
-    ctrl_vpop = augment_gflow(ctrl_gflow, 1000, 'Uniform', noise)
-    mdd_vpop = augment_gflow(mdd_gflow, 1000, 'Uniform', noise)
-    torch.save(ctrl_vpop, f'Virtual Populations/Toy_Control_Uniform{noise}_None_1000_{t_end}hr_test.txt')
-    torch.save(mdd_vpop, f'Virtual Populations/Toy_Atypical_Uniform{noise}_None_1000_{t_end}hr_test.txt')
+    t_end = 24
+    # ctrl_vpop = augment_gflow(ctrl_gflow, 1000, 'Uniform', noise)
+    # mdd_vpop = augment_gflow(mdd_gflow, 1000, 'Uniform', noise)
+    # torch.save(ctrl_vpop, f'Virtual Populations/Toy_Control_Uniform{noise}_None_1000_{t_end}hr_test.txt')
+    # torch.save(mdd_vpop, f'Virtual Populations/Toy_Atypical_Uniform{noise}_None_1000_{t_end}hr_test.txt')
+    torch.save(ctrl_gflow, f'Virtual Populations/Toy_Control_NoNoise_None_1_{t_end}hr_test.txt')
+    torch.save(mdd_gflow, f'Virtual Populations/Toy_Atypical_NoNoise_None_1_{t_end}hr_test.txt')
 
 
 def uniform_noise(input_tensor, noise_magnitude):
@@ -399,9 +401,9 @@ def standardize_data():
 
 
 def main():
-    # generate_dataset()
+    generate_dataset()
     # check_pop_stats()
-    standardize_data()
+    # standardize_data()
 
 if __name__ == '__main__':
     main()
