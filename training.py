@@ -273,26 +273,26 @@ def model_init(info: dict):
 def param_init(model: nn.Module):
     """Initialize the parameters for the mechanistic loss, and set them to
     require gradient"""
-    k_stress = torch.nn.Parameter(torch.tensor(13.7), requires_grad=True)
-    Ki = torch.nn.Parameter(torch.tensor(1.6), requires_grad=True)
-    VS3 = torch.nn.Parameter(torch.tensor(3.25), requires_grad=False)
-    Km1 = torch.nn.Parameter(torch.tensor(1.74), requires_grad=False)
-    KP2 = torch.nn.Parameter(torch.tensor(8.3), requires_grad=False)
-    VS4 = torch.nn.Parameter(torch.tensor(0.907), requires_grad=False)
-    Km2 = torch.nn.Parameter(torch.tensor(0.112), requires_grad=False)
-    KP3 = torch.nn.Parameter(torch.tensor(0.945), requires_grad=False)
-    VS5 = torch.nn.Parameter(torch.tensor(0.00535), requires_grad=False)
-    Km3 = torch.nn.Parameter(torch.tensor(0.0768), requires_grad=False)
-    Kd1 = torch.nn.Parameter(torch.tensor(0.00379), requires_grad=False)
-    Kd2 = torch.nn.Parameter(torch.tensor(0.00916), requires_grad=False)
-    Kd3 = torch.nn.Parameter(torch.tensor(0.356), requires_grad=False)
-    n1 = torch.nn.Parameter(torch.tensor(5.43), requires_grad=True)
-    n2 = torch.nn.Parameter(torch.tensor(5.1), requires_grad=True)
-    Kb = torch.nn.Parameter(torch.tensor(0.0202), requires_grad=True)
-    Gtot = torch.nn.Parameter(torch.tensor(3.28), requires_grad=True)
-    VS2 = torch.nn.Parameter(torch.tensor(0.0509), requires_grad=True)
-    K1 = torch.nn.Parameter(torch.tensor(0.645), requires_grad=True)
-    Kd5 = torch.nn.Parameter(torch.tensor(0.0854), requires_grad=True)
+    k_stress = torch.nn.Parameter(torch.tensor(13.7, device=DEVICE), requires_grad=True)
+    Ki = torch.nn.Parameter(torch.tensor(1.6, device=DEVICE), requires_grad=True)
+    VS3 = torch.nn.Parameter(torch.tensor(3.25, device=DEVICE), requires_grad=False)
+    Km1 = torch.nn.Parameter(torch.tensor(1.74, device=DEVICE), requires_grad=False)
+    KP2 = torch.nn.Parameter(torch.tensor(8.3, device=DEVICE), requires_grad=False)
+    VS4 = torch.nn.Parameter(torch.tensor(0.907, device=DEVICE), requires_grad=False)
+    Km2 = torch.nn.Parameter(torch.tensor(0.112, device=DEVICE), requires_grad=False)
+    KP3 = torch.nn.Parameter(torch.tensor(0.945, device=DEVICE), requires_grad=False)
+    VS5 = torch.nn.Parameter(torch.tensor(0.00535, device=DEVICE), requires_grad=False)
+    Km3 = torch.nn.Parameter(torch.tensor(0.0768, device=DEVICE), requires_grad=False)
+    Kd1 = torch.nn.Parameter(torch.tensor(0.00379, device=DEVICE), requires_grad=False)
+    Kd2 = torch.nn.Parameter(torch.tensor(0.00916, device=DEVICE), requires_grad=False)
+    Kd3 = torch.nn.Parameter(torch.tensor(0.356, device=DEVICE), requires_grad=False)
+    n1 = torch.nn.Parameter(torch.tensor(5.43, device=DEVICE), requires_grad=False)
+    n2 = torch.nn.Parameter(torch.tensor(5.1, device=DEVICE), requires_grad=False)
+    Kb = torch.nn.Parameter(torch.tensor(0.0202, device=DEVICE), requires_grad=False)
+    Gtot = torch.nn.Parameter(torch.tensor(3.28, device=DEVICE), requires_grad=False)
+    VS2 = torch.nn.Parameter(torch.tensor(0.0509, device=DEVICE), requires_grad=False)
+    K1 = torch.nn.Parameter(torch.tensor(0.645, device=DEVICE), requires_grad=False)
+    Kd5 = torch.nn.Parameter(torch.tensor(0.0854, device=DEVICE), requires_grad=False)
 
     params = {
         'k_stress': k_stress,
@@ -332,7 +332,7 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
 
     # For use with mechanistic loss, we need the gradient with respect to time
     #  so we create a linspace and set requires_grad to True
-    domain = torch.linspace(0, 1, 50, requires_grad=True)
+    domain = torch.linspace(0, 1, 50, requires_grad=True).to(DEVICE)
 
     # Print which population we are using to train
     if not virtual and INDIVIDUAL_NUMBER:
@@ -522,7 +522,7 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
     for j, (data, labels) in enumerate(loader):
         if toy_data and not virtual:
             data = data.squeeze(0)
-        t_eval = data[0,:,0].view(-1)
+        t_eval = data[0,:,0].view(-1).to(DEVICE)
 
         # Ensure we have assigned the data and labels to the correct
         #  processing device
@@ -536,7 +536,7 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
             data = data[...,1:]
         data = data.double().to(DEVICE)
         labels = labels.to(DEVICE) if CLASSIFY else data
-        y0 = data[:,0,:]
+        y0 = data[:,0,:].to(DEVICE)
 
         # Zero the gradient from the previous data
         optimizer.zero_grad()
@@ -551,7 +551,7 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
         if MECHANISTIC:
             dense_pred_y = odeint(
                 model, y0, domain
-            ).squeeze()
+            ).squeeze().to(DEVICE)
         # We need to take the output_channels down to a single output, then
         #  we only need the last value (so the value after the entire depth of
         #  the network)
@@ -660,13 +660,13 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
 
         # We pass the data from the entire batch at once, shaped to fit the ANN
         pred_y = model(
-            data.reshape(batch_size_, INPUT_CHANNELS)
-        )
+                data.reshape(batch_size_, INPUT_CHANNELS)
+                )
         # Remove the extraneous dimension from the output of the network so the
         #  shape matches the labels
         pred_y = readout(pred_y).squeeze(-1).reshape(
-            -1, labels.size(1), labels.size(2)
-        ) if CLASSIFY else pred_y.squeeze(-1)
+                -1, labels.size(1), labels.size(2)
+                ) if CLASSIFY else pred_y.squeeze(-1)
 
         # Compute the loss based on the results
         output = loss(pred_y, labels, domain)
@@ -700,7 +700,7 @@ def loss(pred_y: torch.Tensor, labels: torch.Tensor,
         # We loop through all of the patients in the batch and compute the
         #  mechanistic loss for each (I can probably get this to run in one
         #  shot, but this is easier for the moment).
-        for y in dense_pred_y.reshape(BATCH_SIZE, domain.size(0), INPUT_CHANNELS):
+        for y in dense_pred_y.reshape(BATCH_SIZE, domain.size(0), INPUT_CHANNELS).to(DEVICE):
             mech_loss = mechanistic_loss(y, domain, params)
             mech_loss_total += mech_loss
         mech_loss = mech_loss_total/BATCH_SIZE
@@ -715,12 +715,12 @@ def mechanistic_loss(dense_pred_y: torch.Tensor, domain: torch.Tensor,
     """Here we combine the predicted y with the mechanistic knowledge and then
     compute the loss against the experimental data"""
 
-    pred_dy = torch.zeros_like(dense_pred_y)
+    pred_dy = torch.zeros_like(dense_pred_y).to(DEVICE)
     pred_dy[:,0] = torch.autograd.grad(
         dense_pred_y[...,0], domain,
-        grad_outputs=torch.ones_like(domain),
+        grad_outputs=torch.ones_like(domain).to(DEVICE),
         retain_graph=True,
-        create_graph=True
+        create_graph=True,
     )[0]
     pred_dy[:,1] = torch.autograd.grad(
         dense_pred_y[...,1], domain,
@@ -740,7 +740,7 @@ def mechanistic_loss(dense_pred_y: torch.Tensor, domain: torch.Tensor,
         retain_graph=True,
         create_graph=True
     )[0]
-    mechanistic_dy = torch.zeros_like(dense_pred_y)
+    mechanistic_dy = torch.zeros_like(dense_pred_y).to(DEVICE)
     mechanistic_dy[...,0] = params['k_stress']*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n2']))) - params['VS3']*(dense_pred_y[...,0]/(params['Km1'] + dense_pred_y[...,0])) - params['Kd1']*dense_pred_y[...,0]
     mechanistic_dy[...,1] = params['KP2']*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n2']))) - params['VS4']*(dense_pred_y[...,1]/(params['Km2'] + dense_pred_y[...,1])) - params['Kd2']*dense_pred_y[...,0]
     mechanistic_dy[...,2] = params['KP3']*dense_pred_y[...,0] - params['VS5']*(dense_pred_y[...,2]/(params['Km3'] + dense_pred_y[...,2])) - params['Kd3']*dense_pred_y[...,1]
@@ -811,7 +811,16 @@ def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,
         os.makedirs(directory)
 
     # Set the filename for the network state_dict
-    if not virtual and len(PATIENT_GROUPS) == 1:
+    if INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+        filename = (
+            f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+            f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+            f'batchsize{BATCH_SIZE}_'
+            f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+            f'smoothing{LABEL_SMOOTHING}_'
+            f'dropout{DROPOUT}.txt'
+        )
+    elif not virtual and len(PATIENT_GROUPS) == 1:
         filename = (
             f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
             f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'

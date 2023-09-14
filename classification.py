@@ -20,9 +20,9 @@ CLASSIFY = False
 MECHANISTIC = True
 
 # Training hyperparameters
-ITERS = 400
+ITERS = 1000
 SAVE_FREQ = 100
-LR = 1e-3
+LR = 3e-3
 DECAY = 0.
 OPT_RESET = 200
 ATOL = 1e-8
@@ -30,7 +30,7 @@ RTOL = 1e-6
 
 # Training data selection parameters
 POP = 'toydata'
-PATIENT_GROUPS = ['Control'] # Only necessary for POP='NelsonOnly'
+PATIENT_GROUPS = ['Atypical'] # Only necessary for POP='NelsonOnly'
 INDIVIDUAL_NUMBER = 0
 METHOD = 'Uniform'
 NORMALIZE_STANDARDIZE = None
@@ -183,7 +183,8 @@ if __name__ == "__main__":
                     'LABEL_SMOOTHING': LABEL_SMOOTHING,
                     'DROPOUT': DROPOUT,
                     'CORT_ONLY': CORT_ONLY,
-                    'T_END': T_END
+                    'T_END': T_END,
+                    'DEVICE': DEVICE,
                 },
                 virtual=False,
                 # permutations=perms,
@@ -221,7 +222,8 @@ if __name__ == "__main__":
                     'DROPOUT': DROPOUT,
                     'CORT_ONLY': CORT_ONLY,
                     'MAX_ITR': ITERS,
-                    'T_END': T_END
+                    'T_END': T_END,
+                    'DEVICE': DEVICE,
                 },
                 virtual=False,
                 # permutations=perms,
