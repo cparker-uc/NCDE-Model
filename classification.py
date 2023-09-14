@@ -11,7 +11,7 @@ NETWORK_TYPE = 'NODE' # NCDE, NODE, ANN or RNN
 # If using NCDE, should be the number of vars plus 1, since we include time
 # If using NODE, should just be the number of vars
 INPUT_CHANNELS = 4
-HDIM = 16
+HDIM = 32
 # Needs to be 2 for NODE (even though it will be run through readout to combine down to 1)
 OUTPUT_CHANNELS = 4
 # Only necessary for RNN
@@ -20,8 +20,8 @@ CLASSIFY = False
 MECHANISTIC = True
 
 # Training hyperparameters
-ITERS = 1000
-SAVE_FREQ = 1000
+ITERS = 400
+SAVE_FREQ = 100
 LR = 1e-3
 DECAY = 0.
 OPT_RESET = 200
@@ -60,7 +60,7 @@ from testing import test
 
 
 # Define the device with which to train networks
-DEVICE = torch.device('cpu')
+DEVICE = torch.device('cuda')
 
 # These are the permutations of test patients selected from each group 
 #  (hard-coded for reproducibility and easy reference)

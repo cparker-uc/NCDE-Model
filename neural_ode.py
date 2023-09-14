@@ -16,11 +16,15 @@ class NeuralODE(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(input_channels, hdim),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hdim, hdim),
-            nn.ReLU(),
+            nn.Tanh(),
+            nn.Linear(hdim, hdim),
+            nn.Tanh(),
+            nn.Linear(hdim, hdim),
+            nn.Tanh(),
             nn.Linear(hdim, output_channels),
-            nn.ReLU(),
+            nn.Tanh(),
         ).to(device)
 
         for m in self.net.modules():
