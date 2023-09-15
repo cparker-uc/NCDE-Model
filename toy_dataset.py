@@ -194,8 +194,8 @@ def check_pop_stats():
             tmp_sum = torch.sum(data, dim=0, dtype=torch.float64)
             tmp_cat = torch.concatenate((tmp_sum.view(1,5), ctrl_sum.view(1,5)), dim=0)
             ctrl_sum = torch.sum(tmp_cat, dim=0)
-    mdd_mean = mdd_sum/20000 # 1000 patients * 20 time points per
-    ctrl_mean = ctrl_sum/20000
+    mdd_mean = mdd_sum/40000 # 2000 patients * 20 time points per
+    ctrl_mean = ctrl_sum/40000
 
     mdd_pop = torch.zeros((0,20,5))
     ctrl_pop = torch.zeros((0,20,5))
@@ -344,7 +344,12 @@ def standardize_data():
             ctrl_mean = torch.tensor([5, 0.7985, 8.2694, 17.2730, 2.5051])
             ctrl_std = torch.tensor([0, 0.1152, 1.1870, 2.4883, 0.3609])
     elif t_end == 24:
-        if noise == 0.05:
+        if noise == 0.:
+            mdd_mean = torch.tensor([23.8902, 1.6059, 23.1085, 58.7264, 5.6692])
+            mdd_std = torch.tensor([])
+            ctrl_mean = torch.tensor([12.0000,  0.7645,  4.6261, 11.2904,  2.4476])
+            ctrl_std = torch.tensor([0.0000, 0.0222, 0.1327, 0.3253, 0.0706])
+        elif noise == 0.05:
             mdd_mean = torch.tensor([12.0000,  0.7844, 11.2638, 28.1726,  2.8130])
             mdd_std = torch.tensor([0.0000, 0.0227, 0.3239, 0.8158, 0.0815])
             ctrl_mean = torch.tensor([12.0000,  0.7645,  4.6261, 11.2904,  2.4476])
@@ -369,6 +374,7 @@ def standardize_data():
         test=False,
         method='Uniform',
         noise_magnitude=noise,
+        irregular_t_samples=True,
         normalize_standardize='None',
         t_end=t_end,
     )
@@ -376,6 +382,7 @@ def standardize_data():
         test=False,
         method='Uniform',
         noise_magnitude=noise,
+        irregular_t_samples=True,
         normalize_standardize='None',
         t_end=t_end,
     )

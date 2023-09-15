@@ -1,4 +1,4 @@
-mdd_mean=tensor([23.8902,  1.6059, 23.1085, 58.7264,  5.6692], dtype=torch.float64)
+mdd_mean=tensor([11.9451,  0.8029, 11.5543, 29.3632,  2.8346], dtype=torch.float64)
 mdd_std=tensor([2.0911, 0.2984, 1.9086, 5.2817, 0.1023], dtype=torch.float64)
-ctrl_mean=tensor([24.1299,  1.4522,  9.0053, 23.2755,  4.9404], dtype=torch.float64)
+ctrl_mean=tensor([12.0650,  0.7261,  4.5026, 11.6378,  2.4702], dtype=torch.float64)
 ctrl_std=tensor([2.0602, 0.2540, 1.3798, 3.3308, 0.1398], dtype=torch.float64)
