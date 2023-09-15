@@ -24,13 +24,13 @@ ITERS = 2000
 SAVE_FREQ = 1000
 LR = 3e-3
 DECAY = 0.
-OPT_RESET = 200
+OPT_RESET = 1000
 ATOL = 1e-8
 RTOL = 1e-6
 
 # Training data selection parameters
 POP = 'toydata'
-PATIENT_GROUPS = ['Atypical'] # Only necessary for POP='NelsonOnly'
+PATIENT_GROUPS = ['Control'] # Only necessary for POP='NelsonOnly'
 INDIVIDUAL_NUMBER = 0
 METHOD = 'Uniform'
 NORMALIZE_STANDARDIZE = None
@@ -60,7 +60,7 @@ from testing import test
 
 
 # Define the device with which to train networks
-DEVICE = torch.device('cpu')
+DEVICE = torch.device('cuda')
 
 # These are the permutations of test patients selected from each group 
 #  (hard-coded for reproducibility and easy reference)

@@ -273,8 +273,8 @@ def model_init(info: dict):
 def param_init(model: nn.Module):
     """Initialize the parameters for the mechanistic loss, and set them to
     require gradient"""
-    k_stress = torch.nn.Parameter(torch.tensor(13.7, device=DEVICE), requires_grad=True)
-    Ki = torch.nn.Parameter(torch.tensor(1.6, device=DEVICE), requires_grad=True)
+    k_stress = torch.nn.Parameter(torch.tensor(10.1, device=DEVICE), requires_grad=True)
+    Ki = torch.nn.Parameter(torch.tensor(1.51, device=DEVICE), requires_grad=True)
     VS3 = torch.nn.Parameter(torch.tensor(3.25, device=DEVICE), requires_grad=False)
     Km1 = torch.nn.Parameter(torch.tensor(1.74, device=DEVICE), requires_grad=False)
     KP2 = torch.nn.Parameter(torch.tensor(8.3, device=DEVICE), requires_grad=False)
