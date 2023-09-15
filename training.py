@@ -235,7 +235,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
         t_end = t[-1]
     loader = DataLoader(
         dataset=dataset, batch_size=BATCH_SIZE, shuffle=True,
-        num_workers=4
+        num_workers=1
     )
     return loader, (t_steps, t_start, t_end, t)
 

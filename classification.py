@@ -20,7 +20,7 @@ CLASSIFY = False
 MECHANISTIC = True
 
 # Training hyperparameters
-ITERS = 100
+ITERS = 10
 SAVE_FREQ = 100
 LR = 3e-3
 DECAY = 1e-6
