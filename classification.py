@@ -20,10 +20,10 @@ CLASSIFY = False
 MECHANISTIC = True
 
 # Training hyperparameters
-ITERS = 2000
-SAVE_FREQ = 1000
+ITERS = 100
+SAVE_FREQ = 100
 LR = 3e-3
-DECAY = 0.
+DECAY = 1e-6
 OPT_RESET = 1000
 ATOL = 1e-8
 RTOL = 1e-6
@@ -225,7 +225,7 @@ if __name__ == "__main__":
                     'T_END': T_END,
                     'DEVICE': DEVICE,
                 },
-                virtual=False,
+                virtual=True,
                 # permutations=perms,
                 # ctrl_range=CTRL_RANGE,
                 # mdd_range=MDD_RANGE,
