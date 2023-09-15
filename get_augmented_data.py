@@ -27,6 +27,7 @@ class BaseVirtualPopulation(Dataset):
         self.method = method
         self.label_smoothing = label_smoothing
         self.noise_magnitude = noise_magnitude
+        self.irregular_t_samples = False
         # Number of virtual patients corresponding to each real patient
         self.num_per_patient = num_per_patient
         # Number of patients used for creating virtual patients
@@ -63,7 +64,12 @@ class BaseVirtualPopulation(Dataset):
         # Note that we use label to index self.combinations and
         #  self.num_patients in this function. This is valid because we always
         #  expect the values for Control to appear first in these tuples
-        if self.toy_data:
+        if self.toy_data and self.irregular_t_samples:
+            vpop_and_train = torch.cat((
+                torch.load(f'Virtual Populations/Toy_{group}_NoNoise_{self.normalize_standardize}_{self.num_per_patient}_{self.t_end}hr{"_irregularSamples" if self.irregular_t_samples else ""}.txt'),
+                torch.load(f'Virtual Populations/Toy_{group}_NoNoise_{self.normalize_standardize}_{self.num_per_patient}_{self.t_end}hr{"_irregularSamples" if self.irregular_t_samples else ""}_test.txt')
+            ))
+        elif self.toy_data:
             vpop_and_train = torch.cat((
                 torch.load(f'Virtual Populations/Toy_{group}_{self.method}{self.noise_magnitude}_{self.normalize_standardize}_{self.num_per_patient}_{self.t_end}hr.txt'),
                 torch.load(f'Virtual Populations/Toy_{group}_{self.method}{self.noise_magnitude}_{self.normalize_standardize}_{self.num_per_patient}_{self.t_end}hr_test.txt')
@@ -238,7 +244,7 @@ class FullVirtualPopulation_ByLab(BaseVirtualPopulation):
 
 class ToyDataset(BaseVirtualPopulation):
     def __init__(self, test, patient_groups=['Control', 'Atypical'],
-                 noise_magnitude=0.05, method='Uniform',
+                 noise_magnitude=0.05, irregular_t_samples=False, method='Uniform',
                  num_per_patient=1000, normalize_standardize='None',
                  t_end=24):
         super().__init__(method, normalize_standardize, num_per_patient,
@@ -254,6 +260,7 @@ class ToyDataset(BaseVirtualPopulation):
         self.toy_data = True
         self.X = torch.zeros(0, 20, 5)
         self.t_end = t_end
+        self.irregular_t_samples = irregular_t_samples
 
         for group in patient_groups:
             (self.X, self.y) = self.load_group(

@@ -55,6 +55,7 @@ INDIVIDUAL_NUMBER: int = 0
 METHOD: str = ''
 NORMALIZE_STANDARDIZE: str = ''
 NOISE_MAGNITUDE: float = 0.
+IRREGULAR_T_SAMPLES: bool = False
 NUM_PER_PATIENT: int = 0
 POP_NUMBER: int = 0
 BATCH_SIZE: int = 0
@@ -171,6 +172,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
             test=test,
             patient_groups=PATIENT_GROUPS,
             noise_magnitude=NOISE_MAGNITUDE,
+            irregular_t_samples=IRREGULAR_T_SAMPLES,
             method=METHOD,
             normalize_standardize=NORMALIZE_STANDARDIZE,
             t_end=T_END
@@ -235,7 +237,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
         t_end = t[-1]
     loader = DataLoader(
         dataset=dataset, batch_size=BATCH_SIZE, shuffle=True,
-        num_workers=1
+        num_workers=4
     )
     return loader, (t_steps, t_start, t_end, t)
 

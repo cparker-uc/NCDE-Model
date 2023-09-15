@@ -27,11 +27,16 @@ def func(params, y0):
         dy[3] = K_b*y[2]*(G_tot - y[3]) + V_S2*(y[3]**n1/(K1**n1 + y[3]**n1)) \
             - K_d5*y[3]
         return dy
-    t_eval = torch.linspace(0,24,20)
+    t_eval = torch.linspace(0,24,2000)
     gflow = odeint(ode_rhs, y0, t_eval)
     gflow = torch.from_numpy(gflow)
-    return torch.cat((t_eval.view(20,1), gflow), 1)
+    aug_gflow = torch.zeros(0,20,5)
+    for _ in range(1000):
+        time_pt_sample = torch.sort(torch.randperm(2000)[:20], dim=0)[0]
+        tmp = torch.cat((t_eval[time_pt_sample].view(20,1), gflow[time_pt_sample,...]), 1)
+        aug_gflow = torch.cat((aug_gflow.view(-1,20,5), tmp.view(1,20,5)), dim=0)
 
+    return aug_gflow
 
 def generate_dataset():
     """Use a system of ordinary diff eqs to generate time-series data"""
@@ -46,14 +51,14 @@ def generate_dataset():
     mdd_gflow = func(mdd_params, [1, 10.833, 1.90, 2])
     # mdd_gflow = torch.from_numpy(mdd_gflow)
 
-    noise = 0.50
+    noise = 0.
     t_end = 24
     # ctrl_vpop = augment_gflow(ctrl_gflow, 1000, 'Uniform', noise)
     # mdd_vpop = augment_gflow(mdd_gflow, 1000, 'Uniform', noise)
     # torch.save(ctrl_vpop, f'Virtual Populations/Toy_Control_Uniform{noise}_None_1000_{t_end}hr_test.txt')
     # torch.save(mdd_vpop, f'Virtual Populations/Toy_Atypical_Uniform{noise}_None_1000_{t_end}hr_test.txt')
-    torch.save(ctrl_gflow, f'Virtual Populations/Toy_Control_NoNoise_None_1_{t_end}hr_test.txt')
-    torch.save(mdd_gflow, f'Virtual Populations/Toy_Atypical_NoNoise_None_1_{t_end}hr_test.txt')
+    torch.save(ctrl_gflow, f'Virtual Populations/Toy_Control_NoNoise_None_1000_{t_end}hr_irregularSamples.txt')
+    torch.save(mdd_gflow, f'Virtual Populations/Toy_Atypical_NoNoise_None_1000_{t_end}hr_irregularSamples.txt')
 
 
 def uniform_noise(input_tensor, noise_magnitude):
@@ -97,140 +102,138 @@ def check_pop_stats():
     ctrl_maximum = torch.zeros((1,5))
     mdd_maximum = torch.zeros((1,5))
 
-    # iqr = np.zeros(0)
-    # full_range = np.zeros(0)
-    # q1 = np.zeros(0)
-    # q3 = np.zeros(0)
-    noise = 0.50
-    t_end = 2.35
-    ctrl_pop = SriramSimulation(
-        patient_groups=['Control'],
+    noise = 0.
+    t_end = 24
+    #ctrl_pop = SriramSimulation(
+        #patient_groups=['Control'],
+        #normalize_standardize='None',
+    #)[0][0]
+    #mdd_pop = SriramSimulation(
+        #patient_groups=['Atypical'],
+        #normalize_standardize='None',
+    #)[0][0]
+    pop = ToyDataset(
+        test=False,
+        method='Uniform',
+        noise_magnitude=noise,
+        irregular_t_samples=True,
         normalize_standardize='None',
-    )[0][0]
-    mdd_pop = SriramSimulation(
-        patient_groups=['Atypical'],
+        t_end=t_end,
+    )
+    test_pop = ToyDataset(
+        test=False,
+        method='Uniform',
+        noise_magnitude=noise,
+        irregular_t_samples=True,
         normalize_standardize='None',
-    )[0][0]
-    # pop = ToyDataset(
-    #     test=False,
-    #     method='Uniform',
-    #     noise_magnitude=noise,
-    #     normalize_standardize='None',
-    #     t_end=t_end,
-    # )
-    # test_pop = ToyDataset(
-    #     test=False,
-    #     method='Uniform',
-    #     noise_magnitude=noise,
-    #     normalize_standardize='None',
-    #     t_end=t_end,
-    # )
+        t_end=t_end,
+    )
 
-    # for patient in pop:
-    #     (data, label) = patient
-    #     if label == 1:
-    #         cat = np.concatenate(
-    #             (mdd_minimum.reshape(1,5), data.view(20,5)), 0
-    #         )
-    #         mdd_minimum = np.min(cat, axis=0)
-    #         cat = np.concatenate(
-    #             (mdd_maximum.reshape(1,5), data.view(20,5)), 0
-    #         )
-    #         mdd_maximum = np.max(cat, axis=0)
-    #     else:
-    #         cat = np.concatenate(
-    #             (ctrl_minimum.reshape(1,5), data.view(20,5)), 0
-    #         )
-    #         ctrl_minimum = np.min(cat, axis=0)
-    #         cat = np.concatenate(
-    #             (ctrl_maximum.reshape(1,5), data.view(20,5)), 0
-    #         )
-    #         ctrl_maximum = np.max(cat, axis=0)
-    # for patient in test_pop:
-    #     (data, label) = patient
-    #     if label == 1:
-    #         cat = np.concatenate(
-    #             (mdd_minimum.reshape(1,5), data.view(20,5)), 0
-    #         )
-    #         mdd_minimum = np.min(cat, axis=0)
-    #         cat = np.concatenate(
-    #             (mdd_maximum.reshape(1,5), data.view(20,5)), 0
-    #         )
-    #         mdd_maximum = np.max(cat, axis=0)
-    #     else:
-    #         cat = np.concatenate(
-    #             (ctrl_minimum.reshape(1,5), data.view(20,5)), 0
-    #         )
-    #         ctrl_minimum = np.min(cat, axis=0)
-    #         cat = np.concatenate(
-    #             (ctrl_maximum.reshape(1,5), data.view(20,5)), 0
-    #         )
-    #         ctrl_maximum = np.max(cat, axis=0)
-    # mdd_range = mdd_maximum - mdd_minimum
-    # ctrl_range = ctrl_maximum - ctrl_minimum
+    for patient in pop:
+        (data, label) = patient
+        if label == 1:
+            cat = np.concatenate(
+                (mdd_minimum.reshape(1,5), data.view(20,5)), 0
+            )
+            mdd_minimum = np.min(cat, axis=0)
+            cat = np.concatenate(
+                (mdd_maximum.reshape(1,5), data.view(20,5)), 0
+            )
+            mdd_maximum = np.max(cat, axis=0)
+        else:
+            cat = np.concatenate(
+                (ctrl_minimum.reshape(1,5), data.view(20,5)), 0
+            )
+            ctrl_minimum = np.min(cat, axis=0)
+            cat = np.concatenate(
+                (ctrl_maximum.reshape(1,5), data.view(20,5)), 0
+            )
+            ctrl_maximum = np.max(cat, axis=0)
+    for patient in test_pop:
+        (data, label) = patient
+        if label == 1:
+            cat = np.concatenate(
+                (mdd_minimum.reshape(1,5), data.view(20,5)), 0
+            )
+            mdd_minimum = np.min(cat, axis=0)
+            cat = np.concatenate(
+                (mdd_maximum.reshape(1,5), data.view(20,5)), 0
+            )
+            mdd_maximum = np.max(cat, axis=0)
+        else:
+            cat = np.concatenate(
+                (ctrl_minimum.reshape(1,5), data.view(20,5)), 0
+            )
+            ctrl_minimum = np.min(cat, axis=0)
+            cat = np.concatenate(
+                (ctrl_maximum.reshape(1,5), data.view(20,5)), 0
+            )
+            ctrl_maximum = np.max(cat, axis=0)
+    mdd_range = mdd_maximum - mdd_minimum
+    ctrl_range = ctrl_maximum - ctrl_minimum
 
-    # mdd_sum = torch.zeros((1,5), dtype=torch.float64)
-    # ctrl_sum = torch.zeros((1,5), dtype=torch.float64)
-    # for patient in pop:
-    #     (data, label) = patient
-    #     if label == 1:
-    #         tmp_sum = torch.sum(data, dim=0, dtype=torch.float64)
-    #         tmp_cat = torch.concatenate((tmp_sum.view(1,5), mdd_sum.view(1,5)), dim=0)
-    #         mdd_sum = torch.sum(tmp_cat, dim=0)
-    #     else:
-    #         tmp_sum = torch.sum(data, dim=0, dtype=torch.float64)
-    #         tmp_cat = torch.concatenate((tmp_sum.view(1,5), ctrl_sum.view(1,5)), dim=0)
-    #         ctrl_sum = torch.sum(tmp_cat, dim=0)
-    # for patient in test_pop:
-    #     (data, label) = patient
-    #     if label == 1:
-    #         tmp_sum = torch.sum(data, dim=0, dtype=torch.float64)
-    #         tmp_cat = torch.concatenate((tmp_sum.view(1,5), mdd_sum.view(1,5)), dim=0)
-    #         mdd_sum = torch.sum(tmp_cat, dim=0)
-    #     else:
-    #         tmp_sum = torch.sum(data, dim=0, dtype=torch.float64)
-    #         tmp_cat = torch.concatenate((tmp_sum.view(1,5), ctrl_sum.view(1,5)), dim=0)
-    #         ctrl_sum = torch.sum(tmp_cat, dim=0)
-    # mdd_mean = mdd_sum/40000 # 2000 patients * 20 time points per
-    # ctrl_mean = ctrl_sum/40000
+    mdd_sum = torch.zeros((1,5), dtype=torch.float64)
+    ctrl_sum = torch.zeros((1,5), dtype=torch.float64)
+    for patient in pop:
+        (data, label) = patient
+        if label == 1:
+            tmp_sum = torch.sum(data, dim=0, dtype=torch.float64)
+            tmp_cat = torch.concatenate((tmp_sum.view(1,5), mdd_sum.view(1,5)), dim=0)
+            mdd_sum = torch.sum(tmp_cat, dim=0)
+        else:
+            tmp_sum = torch.sum(data, dim=0, dtype=torch.float64)
+            tmp_cat = torch.concatenate((tmp_sum.view(1,5), ctrl_sum.view(1,5)), dim=0)
+            ctrl_sum = torch.sum(tmp_cat, dim=0)
+    for patient in test_pop:
+        (data, label) = patient
+        if label == 1:
+            tmp_sum = torch.sum(data, dim=0, dtype=torch.float64)
+            tmp_cat = torch.concatenate((tmp_sum.view(1,5), mdd_sum.view(1,5)), dim=0)
+            mdd_sum = torch.sum(tmp_cat, dim=0)
+        else:
+            tmp_sum = torch.sum(data, dim=0, dtype=torch.float64)
+            tmp_cat = torch.concatenate((tmp_sum.view(1,5), ctrl_sum.view(1,5)), dim=0)
+            ctrl_sum = torch.sum(tmp_cat, dim=0)
+    mdd_mean = mdd_sum/20000 # 1000 patients * 20 time points per
+    ctrl_mean = ctrl_sum/20000
 
-    # mdd_pop = torch.zeros((0,20,5))
-    # ctrl_pop = torch.zeros((0,20,5))
+    mdd_pop = torch.zeros((0,20,5))
+    ctrl_pop = torch.zeros((0,20,5))
 
-    # for patient in pop:
-    #     (data, label) = patient
-    #     data = data.view(1,20,5)
-    #     if label == 1:
-    #         mdd_pop = torch.cat((mdd_pop, data), dim=0)
-    #     else:
-    #         ctrl_pop = torch.cat((ctrl_pop, data), dim=0)
-    # for patient in test_pop:
-    #     (data, label) = patient
-    #     data = data.view(1,20,5)
-    #     if label == 1:
-    #         mdd_pop = torch.cat((mdd_pop, data), dim=0)
-    #     else:
-    #         ctrl_pop = torch.cat((ctrl_pop, data), dim=0)
+    for patient in pop:
+       (data, label) = patient
+       data = data.view(1,20,5)
+       if label == 1:
+           mdd_pop = torch.cat((mdd_pop, data), dim=0)
+       else:
+           ctrl_pop = torch.cat((ctrl_pop, data), dim=0)
+    for patient in test_pop:
+        (data, label) = patient
+        data = data.view(1,20,5)
+        if label == 1:
+            mdd_pop = torch.cat((mdd_pop, data), dim=0)
+        else:
+            ctrl_pop = torch.cat((ctrl_pop, data), dim=0)
 
-    # mdd_std = torch.zeros((1,5), dtype=torch.float64)
-    # ctrl_std = torch.zeros((1,5), dtype=torch.float64)
-    # mdd_std = torch.std(mdd_pop, dim=0)
-    # ctrl_std = torch.std(ctrl_pop, dim=0)
-    # mdd_std = torch.sum(mdd_std, dim=0)/20
-    # ctrl_std = torch.sum(ctrl_std, dim=0)/20
+    mdd_std = torch.zeros((1,5), dtype=torch.float64)
+    ctrl_std = torch.zeros((1,5), dtype=torch.float64)
+    mdd_std = torch.std(mdd_pop, dim=0)
+    ctrl_std = torch.std(ctrl_pop, dim=0)
+    mdd_std = torch.sum(mdd_std, dim=0)/20
+    ctrl_std = torch.sum(ctrl_std, dim=0)/20
 
-    # for patient in pop:
-    #     (data, label) = patient
-    #     if label == 1:
-    #         tmp_std = torch.std(data, axis=0)
-    #         mdd_std = torch.sum(torch.cat((tmp_std.view(1,5)/20, mdd_std.view(1,5)), axis=0), axis=0)
-    #     else:
-    #         tmp_std = torch.std(data, axis=0)
-    #         ctrl_std = torch.sum(torch.cat((tmp_std.view(1,5)/20, ctrl_std.view(1,5)), axis=0), axis=0)
-    ctrl_mean = torch.mean(ctrl_pop, dim=1)
-    ctrl_std = torch.std(ctrl_pop, dim=1)
-    mdd_mean = torch.mean(mdd_pop, dim=1)
-    mdd_std = torch.std(mdd_pop, dim=1)
+    #for patient in pop:
+        #(data, label) = patient
+        #if label == 1:
+            #tmp_std = torch.std(data, axis=0)
+            #mdd_std = torch.sum(torch.cat((tmp_std.view(1,5)/20, mdd_std.view(1,5)), axis=0), axis=0)
+        #else:
+            #tmp_std = torch.std(data, axis=0)
+            #ctrl_std = torch.sum(torch.cat((tmp_std.view(1,5)/20, ctrl_std.view(1,5)), axis=0), axis=0)
+    #ctrl_mean = torch.mean(ctrl_pop, dim=1)
+    #ctrl_std = torch.std(ctrl_pop, dim=1)
+    #mdd_mean = torch.mean(mdd_pop, dim=1)
+    #mdd_std = torch.std(mdd_pop, dim=1)
 
     with open(f'pop_stats_{noise}_{t_end}hr.txt', 'w+') as file:
         # file.write(f"{mdd_minimum=}\n")
@@ -414,7 +417,7 @@ def standardize_data():
 
 
 def main():
-    # generate_dataset()
+    #generate_dataset()
     check_pop_stats()
     # standardize_data()
 

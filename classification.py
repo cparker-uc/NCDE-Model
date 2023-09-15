@@ -20,11 +20,11 @@ CLASSIFY = False
 MECHANISTIC = True
 
 # Training hyperparameters
-ITERS = 10
+ITERS = 200
 SAVE_FREQ = 100
 LR = 3e-3
 DECAY = 1e-6
-OPT_RESET = 1000
+OPT_RESET = None
 ATOL = 1e-8
 RTOL = 1e-6
 
@@ -34,12 +34,13 @@ PATIENT_GROUPS = ['Control'] # Only necessary for POP='NelsonOnly'
 INDIVIDUAL_NUMBER = 0
 METHOD = 'Uniform'
 NORMALIZE_STANDARDIZE = None
-NOISE_MAGNITUDE = 0.05
+NOISE_MAGNITUDE = 0.
+IRREGULAR_T_SAMPLES = True
 NUM_PER_PATIENT = 100
 POP_NUMBER = 0
-BATCH_SIZE = 1
+BATCH_SIZE = 100
 LABEL_SMOOTHING = 0
-DROPOUT = 0.5
+DROPOUT = 0.
 CORT_ONLY = False
 # These variables determine which population groups to train/test using
 #  Should be 3 for both if using NelsonOnly data, 11 for control and 12 for MDD
@@ -177,6 +178,7 @@ if __name__ == "__main__":
                     'METHOD': METHOD,
                     'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
                     'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
+                    'IRREGULAR_T_SAMPLES': IRREGULAR_T_SAMPLES,
                     'NUM_PER_PATIENT': NUM_PER_PATIENT,
                     'POP_NUMBER': POP_NUMBER,
                     'BATCH_SIZE': BATCH_SIZE,
@@ -186,7 +188,7 @@ if __name__ == "__main__":
                     'T_END': T_END,
                     'DEVICE': DEVICE,
                 },
-                virtual=False,
+                virtual=True,
                 # permutations=perms,
                 # ctrl_range=CTRL_RANGE,
                 # mdd_range=MDD_RANGE,
@@ -215,6 +217,7 @@ if __name__ == "__main__":
                     'METHOD': METHOD,
                     'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
                     'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
+                    'IRREGULAR_T_SAMPLES': IRREGULAR_T_SAMPLES,
                     'NUM_PER_PATIENT': NUM_PER_PATIENT,
                     'POP_NUMBER': POP_NUMBER,
                     'BATCH_SIZE': BATCH_SIZE,
