@@ -1,7 +1,7 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Thu Sep 14, 2023 | 10:08P EDT
+# Last Modified: Fri Sep 15, 2023 | 09:54P EDT
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
@@ -1448,19 +1448,10 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                 f'smoothing{LABEL_SMOOTHING}_'
                 f'dropout{DROPOUT}.txt'
             )
-        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
-            state_file = (
-                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
-                f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
-                f'batchsize{BATCH_SIZE}_'
-                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
-                f'smoothing{LABEL_SMOOTHING}_'
-                f'dropout{DROPOUT}.txt'
-            )
         elif len(PATIENT_GROUPS) == 1:
             state_file = (
                 f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
-                f'{PATIENT_GROUPS[0]}_'
+                f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
                 f'batchsize{BATCH_SIZE}_'
                 f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
                 f'smoothing{LABEL_SMOOTHING}_'
