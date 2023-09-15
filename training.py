@@ -841,6 +841,16 @@ def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,
             f'smoothing{LABEL_SMOOTHING}_'
             f'dropout{DROPOUT}.txt'
         )
+    elif toy_dataset:
+        filename = (
+            f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+            f'{group+"_" for group in PATIENT_GROUPS}_'
+            f'batchsize{BATCH_SIZE}_'
+            f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+            f'smoothing{LABEL_SMOOTHING}_'
+            f'dropout{DROPOUT}_{T_END}hrs'
+            f'{"_irregularSamples" if IRREGULAR_T_SAMPLES else ""}.txt'
+        )
     else:
         filename = (
             f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'

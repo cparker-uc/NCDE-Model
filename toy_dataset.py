@@ -345,10 +345,10 @@ def standardize_data():
             ctrl_std = torch.tensor([0, 0.1152, 1.1870, 2.4883, 0.3609])
     elif t_end == 24:
         if noise == 0.:
-            mdd_mean = torch.tensor([23.8902, 1.6059, 23.1085, 58.7264, 5.6692])
-            mdd_std = torch.tensor([])
-            ctrl_mean = torch.tensor([12.0000,  0.7645,  4.6261, 11.2904,  2.4476])
-            ctrl_std = torch.tensor([0.0000, 0.0222, 0.1327, 0.3253, 0.0706])
+            mdd_mean = torch.tensor([11.9451, 0.8029, 11.5543, 29.3632, 2.8346])
+            mdd_std = torch.tensor([2.0911, 0.2984, 1.9086, 5.2817, 0.1023])
+            ctrl_mean = torch.tensor([12.0650, 0.7261, 4.5026, 11.6378, 2.4702])
+            ctrl_std = torch.tensor([2.0602, 0.2540, 1.3798, 3.3308, 0.1398])
         elif noise == 0.05:
             mdd_mean = torch.tensor([12.0000,  0.7844, 11.2638, 28.1726,  2.8130])
             mdd_std = torch.tensor([0.0000, 0.0227, 0.3239, 0.8158, 0.0815])
@@ -408,25 +408,25 @@ def standardize_data():
             ctrl_test_pop = torch.cat((ctrl_test_pop, data), dim=0)
 
     mdd_pop_standard = (mdd_pop[...,1:] - mdd_mean[...,1:])/mdd_std[...,1:]
-    mdd_pop_standard = torch.cat(((mdd_pop[...,0]/t_end).view(1000,20,1), mdd_pop_standard), dim=2)
+    mdd_pop_standard = torch.cat(((mdd_pop[...,0]).view(1000,20,1), mdd_pop_standard), dim=2)
     mdd_test_pop_standard = (mdd_test_pop[...,1:] - mdd_mean[...,1:])/mdd_std[...,1:]
     mdd_test_pop_standard = torch.cat(((mdd_test_pop[...,0]/t_end).view(1000,20,1), mdd_test_pop_standard), dim=2)
 
     ctrl_pop_standard = (ctrl_pop[...,1:] - ctrl_mean[...,1:])/ctrl_std[...,1:]
-    ctrl_pop_standard = torch.cat(((ctrl_pop[...,0]/t_end).view(1000,20,1), ctrl_pop_standard), dim=2)
+    ctrl_pop_standard = torch.cat(((ctrl_pop[...,0]).view(1000,20,1), ctrl_pop_standard), dim=2)
     ctrl_test_pop_standard = (ctrl_test_pop[...,1:] - ctrl_mean[...,1:])/ctrl_std[...,1:]
     ctrl_test_pop_standard = torch.cat(((ctrl_test_pop[...,0]/t_end).view(1000,20,1), ctrl_test_pop_standard), dim=2)
 
-    torch.save(mdd_pop_standard, f"Virtual Populations/Toy_Atypical_Uniform{noise}_Standardize_1000_{t_end}hr.txt")
-    torch.save(mdd_test_pop_standard, f"Virtual Populations/Toy_Atypical_Uniform{noise}_Standardize_1000_{t_end}hr_test.txt")
-    torch.save(ctrl_pop_standard, f"Virtual Populations/Toy_Control_Uniform{noise}_Standardize_1000_{t_end}hr.txt")
-    torch.save(ctrl_test_pop_standard, f"Virtual Populations/Toy_Control_Uniform{noise}_Standardize_1000_{t_end}hr_test.txt")
+    torch.save(mdd_pop_standard, f"Virtual Populations/Toy_Atypical_NoNoise_Standardize_1000_{t_end}hr_irregularSamples.txt")
+    torch.save(mdd_test_pop_standard, f"Virtual Populations/Toy_Atypical_NoNoise_Standardize_1000_{t_end}hr_irregularSamples_test.txt")
+    torch.save(ctrl_pop_standard, f"Virtual Populations/Toy_Control_NoNoise_Standardize_1000_{t_end}hr_irregularSamples.txt")
+    torch.save(ctrl_test_pop_standard, f"Virtual Populations/Toy_Control_NoNoise_Standardize_1000_{t_end}hr_irregularSamples_test.txt")
 
 
 def main():
     #generate_dataset()
-    check_pop_stats()
-    # standardize_data()
+    #check_pop_stats()
+    standardize_data()
 
 if __name__ == '__main__':
     main()
