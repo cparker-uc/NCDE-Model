@@ -1,7 +1,7 @@
 # File Name: toy_dataset.py
 # Author: Christopher Parker
 # Created: Tue Aug 01, 2023 | 10:09P EDT
-# Last Modified: Thu Sep 14, 2023 | 02:35P EDT
+# Last Modified: Fri Sep 15, 2023 | 03:34P EDT
 
 """Creates a toy dataset for use in validation of the NCDE architecture.
 Apologies for the haphazard nature of the code, it was done quickly and
@@ -57,8 +57,8 @@ def generate_dataset():
     # mdd_vpop = augment_gflow(mdd_gflow, 1000, 'Uniform', noise)
     # torch.save(ctrl_vpop, f'Virtual Populations/Toy_Control_Uniform{noise}_None_1000_{t_end}hr_test.txt')
     # torch.save(mdd_vpop, f'Virtual Populations/Toy_Atypical_Uniform{noise}_None_1000_{t_end}hr_test.txt')
-    torch.save(ctrl_gflow, f'Virtual Populations/Toy_Control_NoNoise_None_1000_{t_end}hr_irregularSamples.txt')
-    torch.save(mdd_gflow, f'Virtual Populations/Toy_Atypical_NoNoise_None_1000_{t_end}hr_irregularSamples.txt')
+    torch.save(ctrl_gflow, f'Virtual Populations/Toy_Control_NoNoise_None_1000_{t_end}hr_irregularSamples_test.txt')
+    torch.save(mdd_gflow, f'Virtual Populations/Toy_Atypical_NoNoise_None_1000_{t_end}hr_irregularSamples_test.txt')
 
 
 def uniform_noise(input_tensor, noise_magnitude):
@@ -345,9 +345,9 @@ def standardize_data():
             ctrl_std = torch.tensor([0, 0.1152, 1.1870, 2.4883, 0.3609])
     elif t_end == 24:
         if noise == 0.:
-            mdd_mean = torch.tensor([11.9451, 0.8029, 11.5543, 29.3632, 2.8346])
+            mdd_mean = torch.tensor([11.9451,  0.8029, 11.5543, 29.3632,  2.8346])
             mdd_std = torch.tensor([2.0911, 0.2984, 1.9086, 5.2817, 0.1023])
-            ctrl_mean = torch.tensor([12.0650, 0.7261, 4.5026, 11.6378, 2.4702])
+            ctrl_mean = torch.tensor([12.0650,  0.7261,  4.5026, 11.6378,  2.4702])
             ctrl_std = torch.tensor([2.0602, 0.2540, 1.3798, 3.3308, 0.1398])
         elif noise == 0.05:
             mdd_mean = torch.tensor([12.0000,  0.7844, 11.2638, 28.1726,  2.8130])
@@ -424,8 +424,8 @@ def standardize_data():
 
 
 def main():
-    #generate_dataset()
-    #check_pop_stats()
+    # generate_dataset()
+    # check_pop_stats()
     standardize_data()
 
 if __name__ == '__main__':

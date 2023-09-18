@@ -1,42 +1,30 @@
-# File Name: ann.py
+# File Name: mech_ann.py
 # Author: Christopher Parker
-# Created: Tue Aug 22, 2023 | 10:07P EDT
-# Last Modified: Mon Sep 18, 2023 | 02:44P EDT
+# Created: Mon Sep 18, 2023 | 10:02P EDT
+# Last Modified: Mon Sep 18, 2023 | 02:31P EDT
 
-"""Contains the class for using ANN instead of NODE/NCDE"""
+"""Code for the mechanistic ANN class"""
 
 import torch
 import torch.nn as nn
 import numpy as np
+from ann import ANN
 
 
-class ANN(nn.Module):
-    def __init__(self, input_channels, hdim, output_channels, dropout=0.,
-                 device=torch.device('cpu')):
+class MechanisticANN(nn.Module):
+    def __init__(self, input_channels, hdim, output_channels, t_steps,
+                 dropout=0., device=torch.device('cpu')):
         super().__init__()
+        self.model = ANN(
+            1, hdim, output_channels,
+            dropout=dropout, device=device
+        ).double()
 
-        self.net = nn.Sequential(
-            nn.Linear(input_channels, hdim),
-            nn.ReLU(),
-            nn.Linear(hdim, hdim),
-            nn.Dropout(dropout),
-            nn.ReLU(),
-            nn.Linear(hdim, hdim),
-            nn.ReLU(),
-            nn.Linear(hdim, hdim),
-            nn.ReLU(),
-            nn.Linear(hdim, hdim),
-            nn.ReLU(),
-            nn.Linear(hdim, output_channels),
-        ).to(device)
+    def forward(self, t):
+        """On the forward pass, we call the standard ANN three times:
+        once for x, once for t, and once to combine the results"""
 
-        for m in self.net.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
-                nn.init.constant_(m.bias, 0)
-
-    def forward(self, y):
-        return self.net(y)
+        return self.model(t)
 
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#

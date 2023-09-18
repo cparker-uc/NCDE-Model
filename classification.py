@@ -1,17 +1,17 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Thu Sep 14, 2023 | 01:44P EDT
+# Last Modified: Mon Sep 18, 2023 | 06:51P EDT
 
 "Root file for classification of augmented TSST or simulation data"
 
 # Network architecture parameters
-NETWORK_TYPE = 'NODE' # NCDE, NODE, ANN or RNN
+NETWORK_TYPE = 'ANN' # NCDE, NODE, ANN or RNN
 # Should be 40 for Toy dataset or 22 for others if using ANN or RNN
 # If using NCDE, should be the number of vars plus 1, since we include time
 # If using NODE, should just be the number of vars
-INPUT_CHANNELS = 4
-HDIM = 32
+INPUT_CHANNELS = 1
+HDIM = 256
 # Needs to be 2 for NODE (even though it will be run through readout to combine down to 1)
 OUTPUT_CHANNELS = 4
 # Only necessary for RNN
@@ -20,8 +20,8 @@ CLASSIFY = False
 MECHANISTIC = True
 
 # Training hyperparameters
-ITERS = 200
-SAVE_FREQ = 100
+ITERS = 100
+SAVE_FREQ = 10
 LR = 3e-3
 DECAY = 1e-6
 OPT_RESET = None
@@ -38,7 +38,7 @@ NOISE_MAGNITUDE = 0.
 IRREGULAR_T_SAMPLES = True
 NUM_PER_PATIENT = 100
 POP_NUMBER = 0
-BATCH_SIZE = 100
+BATCH_SIZE = 1
 LABEL_SMOOTHING = 0
 DROPOUT = 0.
 CORT_ONLY = False
@@ -61,7 +61,7 @@ from testing import test
 
 
 # Define the device with which to train networks
-DEVICE = torch.device('cuda')
+DEVICE = torch.device('cpu')
 
 # These are the permutations of test patients selected from each group 
 #  (hard-coded for reproducibility and easy reference)
@@ -188,7 +188,7 @@ if __name__ == "__main__":
                     'T_END': T_END,
                     'DEVICE': DEVICE,
                 },
-                virtual=True,
+                virtual=False,
                 # permutations=perms,
                 # ctrl_range=CTRL_RANGE,
                 # mdd_range=MDD_RANGE,
@@ -228,7 +228,7 @@ if __name__ == "__main__":
                     'T_END': T_END,
                     'DEVICE': DEVICE,
                 },
-                virtual=True,
+                virtual=False,
                 # permutations=perms,
                 # ctrl_range=CTRL_RANGE,
                 # mdd_range=MDD_RANGE,

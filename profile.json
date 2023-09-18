@@ -1,0 +1,235 @@
+{
+    "alloc_samples": 170,
+    "elapsed_time_sec": 4162.836173057556,
+    "files": {
+        "/Users/christopher/Documents/PTSD/NCDE Model/testing.py": {
+            "functions": [],
+            "leaks": {},
+            "lines": [
+                {
+                    "line": "import pandas as pd\n",
+                    "lineno": 13,
+                    "memory_samples": [
+                        [
+                            1922718125,
+                            127.67879480571898
+                        ],
+                        [
+                            2186037667,
+                            144.94501408713455
+                        ]
+                    ],
+                    "n_avg_mb": 0.0,
+                    "n_copy_mb_s": 0.004678722241003335,
+                    "n_cpu_percent_c": 0.0,
+                    "n_cpu_percent_python": 0.0,
+                    "n_gpu_avg_memory_mb": 0.0,
+                    "n_gpu_peak_memory_mb": 0.0,
+                    "n_gpu_percent": 0,
+                    "n_growth_mb": 17.81032085418701,
+                    "n_malloc_mb": 19.64367961883545,
+                    "n_mallocs": 0,
+                    "n_peak_mb": 17.81032085418701,
+                    "n_python_fraction": 0.9828419283912124,
+                    "n_sys_percent": 0.0,
+                    "n_usage_fraction": 0.12332045414664947
+                },
+                {
+                    "line": "import matplotlib.pyplot as plt\n",
+                    "lineno": 15,
+                    "memory_samples": [
+                        [
+                            2199704334,
+                            146.5140920329101
+                        ],
+                        [
+                            2519866500,
+                            163.5852191156474
+                        ]
+                    ],
+                    "n_avg_mb": 0.0,
+                    "n_copy_mb_s": 0.016087632293553082,
+                    "n_cpu_percent_c": 0.0,
+                    "n_cpu_percent_python": 0.0,
+                    "n_gpu_avg_memory_mb": 0.0,
+                    "n_gpu_peak_memory_mb": 0.0,
+                    "n_gpu_percent": 0,
+                    "n_growth_mb": 17.887348175048828,
+                    "n_malloc_mb": 17.887348175048828,
+                    "n_mallocs": 0,
+                    "n_peak_mb": 17.887348175048828,
+                    "n_python_fraction": 0.9962969026504989,
+                    "n_sys_percent": 0.0,
+                    "n_usage_fraction": 0.11229443481205766
+                }
+            ],
+            "percent_cpu_time": 0.0
+        },
+        "/Users/christopher/Documents/PTSD/NCDE Model/training.py": {
+            "functions": [
+                {
+                    "line": "node_training_epoch",
+                    "lineno": 518,
+                    "memory_samples": [],
+                    "n_avg_mb": 0.0,
+                    "n_copy_mb_s": 0.0244688817951009,
+                    "n_cpu_percent_c": 0.0,
+                    "n_cpu_percent_python": 0.00019164705553105296,
+                    "n_gpu_avg_memory_mb": 0.0,
+                    "n_gpu_peak_memory_mb": 0.0,
+                    "n_gpu_percent": 0,
+                    "n_growth_mb": 0.0,
+                    "n_malloc_mb": 0.0,
+                    "n_mallocs": 0,
+                    "n_peak_mb": 0.0,
+                    "n_python_fraction": 0,
+                    "n_sys_percent": 0.02930358481040162,
+                    "n_usage_fraction": 0.0
+                }
+            ],
+            "leaks": {},
+            "lines": [
+                {
+                    "line": "import torchcde\n",
+                    "lineno": 15,
+                    "memory_samples": [
+                        [
+                            1536240042,
+                            116.65981816808885
+                        ]
+                    ],
+                    "n_avg_mb": 0.0,
+                    "n_copy_mb_s": 0.002243802652635898,
+                    "n_cpu_percent_c": 0.0,
+                    "n_cpu_percent_python": 0.0,
+                    "n_gpu_avg_memory_mb": 0.0,
+                    "n_gpu_peak_memory_mb": 0.0,
+                    "n_gpu_percent": 0,
+                    "n_growth_mb": 10.396980285644531,
+                    "n_malloc_mb": 10.396980285644531,
+                    "n_mallocs": 0,
+                    "n_peak_mb": 10.396980285644531,
+                    "n_python_fraction": 0.9777489786713,
+                    "n_sys_percent": 0.0,
+                    "n_usage_fraction": 0.0652708838394024
+                },
+                {
+                    "line": "                        info: dict, toy_data: bool=False):\n",
+                    "lineno": 523,
+                    "memory_samples": [],
+                    "n_avg_mb": 0.0,
+                    "n_copy_mb_s": 0.0244688817951009,
+                    "n_cpu_percent_c": 0.0,
+                    "n_cpu_percent_python": 0.00019164705553105296,
+                    "n_gpu_avg_memory_mb": 0.0,
+                    "n_gpu_peak_memory_mb": 0.0,
+                    "n_gpu_percent": 0,
+                    "n_growth_mb": 0.0,
+                    "n_malloc_mb": 0.0,
+                    "n_mallocs": 0,
+                    "n_peak_mb": 0.0,
+                    "n_python_fraction": 0,
+                    "n_sys_percent": 0.02930358481040162,
+                    "n_usage_fraction": 0.0
+                }
+            ],
+            "percent_cpu_time": 0.029495231865932673
+        },
+        "classification.py": {
+            "functions": [],
+            "leaks": {},
+            "lines": [
+                {
+                    "line": "import sys\n",
+                    "lineno": 55,
+                    "memory_samples": [
+                        [
+                            412538209,
+                            16.48603118246794
+                        ],
+                        [
+                            412554750,
+                            34.23762310677525
+                        ],
+                        [
+                            655199917,
+                            51.20648586730229
+                        ],
+                        [
+                            883344834,
+                            68.32014499718028
+                        ],
+                        [
+                            1071922500,
+                            85.66838992226215
+                        ],
+                        [
+                            1259122584,
+                            102.75324291425625
+                        ]
+                    ],
+                    "n_avg_mb": 0.0,
+                    "n_copy_mb_s": 0.0238692873028862,
+                    "n_cpu_percent_c": 0.0,
+                    "n_cpu_percent_python": 0.0,
+                    "n_gpu_avg_memory_mb": 0.0,
+                    "n_gpu_peak_memory_mb": 0.0,
+                    "n_gpu_percent": 0,
+                    "n_growth_mb": 111.36170387268066,
+                    "n_malloc_mb": 111.36170387268066,
+                    "n_mallocs": 0,
+                    "n_peak_mb": 111.36170387268066,
+                    "n_python_fraction": 0.628570039799048,
+                    "n_sys_percent": 0.0,
+                    "n_usage_fraction": 0.6991142272018905
+                }
+            ],
+            "percent_cpu_time": 0.0
+        }
+    },
+    "gpu": false,
+    "growth_rate": 102.69473741156756,
+    "max_footprint_fname": "/Users/christopher/Documents/PTSD/NCDE Model/testing.py",
+    "max_footprint_lineno": 15,
+    "max_footprint_mb": 163.58215141296387,
+    "memory": true,
+    "program": "classification.py",
+    "samples": [
+        [
+            412507459,
+            16.500393588478182
+        ],
+        [
+            412511292,
+            34.235485035950255
+        ],
+        [
+            655184917,
+            51.19907721489636
+        ],
+        [
+            883340167,
+            68.32462990282632
+        ],
+        [
+            1071918542,
+            85.65166995276971
+        ],
+        [
+            1259119542,
+            102.75788001477652
+        ],
+        [
+            1656359084,
+            119.79346828778822
+        ],
+        [
+            2073650417,
+            136.9923407817282
+        ],
+        [
+            2294822834,
+            154.31480391671587
+        ]
+    ]
+}

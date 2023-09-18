@@ -1,7 +1,7 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Fri Sep 15, 2023 | 09:54P EDT
+# Last Modified: Mon Sep 18, 2023 | 06:38P EDT
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
@@ -57,6 +57,7 @@ INDIVIDUAL_NUMBER: int = 0
 METHOD: str = ''
 NORMALIZE_STANDARDIZE: str = ''
 NOISE_MAGNITUDE: float = 0.
+IRREGULAR_T_SAMPLES = True
 NUM_PER_PATIENT: int = 0
 POP_NUMBER: int = 0
 BATCH_SIZE: int = 0
@@ -159,7 +160,10 @@ def test_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
         elif NETWORK_TYPE == 'NODE':
             classification_node_testing(model, loader, info) if CLASSIFY else prediction_node_testing(model, loader, info)
         elif NETWORK_TYPE == 'ANN':
-            classification_ann_testing(model, loader, info) if CLASSIFY else prediction_ann_testing(model, loader, info)
+            if MECHANISTIC:
+                prediction_ann_testing_mechanistic(model, loader, info)
+            else:
+                classification_ann_testing(model, loader, info) if CLASSIFY else prediction_ann_testing(model, loader, info)
         elif NETWORK_TYPE == 'RNN':
             classification_rnn_testing(model, loader, info) if CLASSIFY else prediction_rnn_testing(model, loader, info)
         else:
@@ -195,6 +199,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
             test=test,
             patient_groups=PATIENT_GROUPS,
             noise_magnitude=NOISE_MAGNITUDE,
+            irregular_t_samples=IRREGULAR_T_SAMPLES,
             method=METHOD,
             normalize_standardize=NORMALIZE_STANDARDIZE,
             t_end=T_END
@@ -275,6 +280,11 @@ def model_init(info: dict):
             device=DEVICE,
         ).double()
     if NETWORK_TYPE == 'ANN':
+        if MECHANISTIC:
+            return ANN(
+                INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS, dropout=DROPOUT,
+                device=DEVICE
+            )
         return ANN(
             INPUT_CHANNELS*t_steps, HDIM,
             OUTPUT_CHANNELS*t_steps,
@@ -1334,7 +1344,8 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     t_steps = info.get('t_steps', 11)
 
     # Initialize the parameters if we are doing mechanistic loss
-    param_init(model)
+    if MECHANISTIC:
+        param_init(model)
 
     # Set up the index numbers to match the patient numbers of the test
     #  patients (or just 1-5 for Control and the same for MDD if no test
@@ -1609,7 +1620,18 @@ def prediction_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
-        if virtual:
+        if toy_data:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}_'
+                f'{PATIENT_GROUPS[1]+"_" if len(PATIENT_GROUPS) > 1 else ""}'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}_{T_END}hrs'
+                f'{"_irregularSamples" if IRREGULAR_T_SAMPLES else ""}.txt'
+            )
+        elif virtual:
             state_file = (
                 f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
                 f'{METHOD}{NOISE_MAGNITUDE}Virtual_{"mechanistic_" if MECHANISTIC else ""}'
@@ -1694,7 +1716,191 @@ def prediction_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                     patient_id = f'MDD Patient {index[i]}'
 
                 # Graph the results
-                graph_results(pred_y, data_orig, patient_id, itr, info)
+                graph_results(pred_y, dense_t_eval, data_orig, patient_id,
+                              itr, info)
+
+
+def prediction_ann_testing_mechanistic(model: NeuralCDE, loader: DataLoader,
+                                       info: dict):
+    """Run the testing procedure for the given model and DataLoader"""
+    ctrl_num = info.get('ctrl_num')
+    control_combination = info.get('control_combination')
+    mdd_num = info.get('mdd_num')
+    mdd_combination = info.get('mdd_combination')
+    by_lab = info.get('by_lab')
+    virtual = info.get('virtual', True)
+    ableson_pop = info.get('ableson_pop', False)
+    toy_data = info.get('toy_data', False)
+    t_steps = info.get('t_steps', 11)
+
+    # Initialize the parameters if we are doing mechanistic loss
+    param_init(model)
+
+    # Set up the index numbers to match the patient numbers of the test
+    #  patients (or just 1-5 for Control and the same for MDD if no test
+    #  combinations)
+    if control_combination:
+        index = control_combination+mdd_combination
+    elif ableson_pop:
+        index = [i for i in range(50)]
+    elif toy_data and len(PATIENT_GROUPS) == 1:
+        index = [i for i in range(1000)]
+    elif toy_data:
+        index = [i for i in range(2000)]
+    elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+        index = [INDIVIDUAL_NUMBER]
+    else:
+        index = [i for i in range(5)]
+        index = index+index
+
+    tmp_index = []
+    for i, entry in enumerate(index):
+        if ableson_pop:
+            if i < 37:
+                t = PATIENT_GROUPS[0] + ' ' +  str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif toy_data:
+            if i < 1000:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif control_combination:
+            if i < len(control_combination):
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            t = PATIENT_GROUPS[0] + ' ' + str(entry)
+        else:
+            if i < 5:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        tmp_index.append(t)
+    index = tuple(tmp_index)
+
+    # Set the directory name where the model state dictionaries are located
+    if not virtual and len(PATIENT_GROUPS) == 1:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{PATIENT_GROUPS[0] if not toy_data else "Toy Dataset"}/'
+        )
+    elif not virtual:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+        )
+    elif toy_data:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Toy Dataset/'
+        )
+    elif not POP_NUMBER:
+        directory = (
+            f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{"By Lab" if by_lab else "By Diagnosis"}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    else:
+        directory = (
+            f'Network States (VPOP Training)/'
+            f'Control vs {PATIENT_GROUPS[1]} Population {POP_NUMBER}/'
+        )
+
+    # Loop over the state dictionaries based on the number of iterations, from
+    #  100 to MAX_ITR*100
+    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    for itr in range(1,n_saves+1):
+        # Set the filename for the network state_dict
+        if toy_data:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}_'
+                f'{PATIENT_GROUPS[1]+"_" if len(PATIENT_GROUPS) > 1 else ""}'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}_{T_END}hrs'
+                f'{"_irregularSamples" if IRREGULAR_T_SAMPLES else ""}.txt'
+            )
+        elif virtual:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_{"mechanistic_" if MECHANISTIC else ""}'
+                f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
+                f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}'
+                f'{"_byLab" if by_lab else ""}.txt'
+            )
+        elif ableson_pop:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination)}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination)}_'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        else:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'Control_vs_{PATIENT_GROUPS[1]}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        state_filepath = os.path.join(directory, state_file)
+        # Check that the file exists
+        if not os.path.exists(state_filepath):
+            raise FileNotFoundError(f'Failed to load file: {state_filepath}')
+        # Load the state dictionary from the file and set the model to that
+        #  state
+        state_dict = torch.load(state_filepath, map_location=DEVICE)
+        model.load_state_dict(state_dict)
+        domain = torch.linspace(0, T_END, 1000).view(-1,1)
+
+        # Loop through the test patients
+        for i, (data, labels) in enumerate(loader):
+            for i, pt in enumerate(data):
+                if INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+                    pt = pt.double().view(1,t_steps,-1)
+
+                # We need to reshape the data to fit the ANN properly
+                pred_y = model(domain).squeeze(-1).reshape(domain.size(0), OUTPUT_CHANNELS)
+
+                if i < len(index)/2:
+                    patient_id = f'Control Patient {index[i]}'
+                else:
+                    patient_id = f'MDD Patient {index[i]}'
+
+                # Graph the results
+                graph_results(pred_y, domain, pt, patient_id,
+                              itr, info)
 
 
 def prediction_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
@@ -1885,7 +2091,8 @@ def prediction_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                     patient_id = f'MDD Patient {index[i]}'
 
                 # Graph the results
-                graph_results(pred_y, data_orig, patient_id, itr, info)
+                graph_results(pred_y, dense_t_eval, data_orig, patient_id,
+                              itr, info)
 
 
 def param_init(model: nn.Module):
@@ -2046,7 +2253,7 @@ def graph_results(pred_y: torch.Tensor, pred_t: torch.Tensor,
         directory = (
             f'Results/'
             f'{"Classification" if CLASSIFY else "Prediction"}/'
-            f'{PATIENT_GROUPS[0]}/'
+            f'{PATIENT_GROUPS[0] if not toy_data else "Toy Dataset"}/'
         )
     elif not virtual:
         directory = (
@@ -2083,7 +2290,18 @@ def graph_results(pred_y: torch.Tensor, pred_t: torch.Tensor,
         os.makedirs(directory)
 
     # Set the filename for the network state_dict
-    if not virtual and len(PATIENT_GROUPS) == 1:
+    if toy_data:
+        filename = (
+            f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+            f'{PATIENT_GROUPS[0]}_'
+            f'{PATIENT_GROUPS[1]+"_" if len(PATIENT_GROUPS) > 1 else ""}'
+            f'batchsize{BATCH_SIZE}_'
+            f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+            f'smoothing{LABEL_SMOOTHING}_'
+            f'dropout{DROPOUT}_{T_END}hrs'
+            f'{"_irregularSamples" if IRREGULAR_T_SAMPLES else ""}_'
+        )
+    elif not virtual and len(PATIENT_GROUPS) == 1:
         filename = (
             f'{NETWORK_TYPE}_{HDIM}nodes_'
             f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
@@ -2118,8 +2336,8 @@ def graph_results(pred_y: torch.Tensor, pred_t: torch.Tensor,
 
     # pred_y = pred_y.view(data.size(1), data.size(2)-1)
     pred_y = pred_y.squeeze()
-    fig, axes = plt.subplots(nrows=INPUT_CHANNELS, figsize=(10,10))
-    for idx,ax in enumerate(range(INPUT_CHANNELS)):
+    fig, axes = plt.subplots(nrows=OUTPUT_CHANNELS, figsize=(10,10))
+    for idx,ax in enumerate(range(OUTPUT_CHANNELS)):
         axes[ax].plot(data[...,0].squeeze(), data[...,idx+1].squeeze(), 'o', label=patient_id)
         axes[ax].plot(
             pred_t, pred_y[:,idx], label=f'Predicted y ({itr} iterations)'

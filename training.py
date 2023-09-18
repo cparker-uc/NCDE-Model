@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Thu Sep 14, 2023 | 02:19P EDT
+# Last Modified: Mon Sep 18, 2023 | 06:50P EDT
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchcde
+from torchviz import make_dot
 from typing import Any
 from torch.nn.functional import binary_cross_entropy_with_logits, mse_loss
 from torch.utils.data import DataLoader
@@ -21,6 +22,7 @@ from torchdiffeq import odeint_adjoint as odeint
 from neural_cde import NeuralCDE
 from neural_ode import NeuralODE
 from ann import ANN
+from mech_ann import MechanisticANN
 from rnn import RNN
 from get_data import AblesonData, NelsonData, SriramSimulation
 from get_augmented_data import (FullVirtualPopulation,
@@ -260,8 +262,8 @@ def model_init(info: dict):
         ).double()
     elif NETWORK_TYPE == 'ANN':
         return ANN(
-            INPUT_CHANNELS*t_steps, HDIM,
-            OUTPUT_CHANNELS*t_steps,
+            INPUT_CHANNELS*t_steps if not MECHANISTIC else INPUT_CHANNELS, HDIM,
+            OUTPUT_CHANNELS*t_steps if not MECHANISTIC else OUTPUT_CHANNELS,
             device=DEVICE
         ).double()
     elif NETWORK_TYPE == 'RNN':
@@ -335,7 +337,7 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
 
     # For use with mechanistic loss, we need the gradient with respect to time
     #  so we create a linspace and set requires_grad to True
-    domain = torch.linspace(0, 1, 50, requires_grad=True).to(DEVICE)
+    domain = torch.linspace(0, T_END, 100, requires_grad=True).to(DEVICE)
 
     # Print which population we are using to train
     if not virtual and INDIVIDUAL_NUMBER:
@@ -386,8 +388,12 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
                 node_training_epoch(itr, loader, model, readout,
                                     optimizer, loss_over_time, domain, params, info, toy_data=toy_data)
             case 'ANN':
-                ann_training_epoch(itr, loader, model, optimizer, loss_over_time,
-                                   domain, info, toy_data=toy_data)
+                if MECHANISTIC:
+                    ann_training_epoch_mech(itr, loader, model, optimizer, loss_over_time,
+                                   domain, params, info, toy_data=toy_data)
+                else:
+                    ann_training_epoch(itr, loader, model, optimizer, loss_over_time,
+                                       domain, info, toy_data=toy_data)
             case 'RNN':
                 rnn_training_epoch(itr, loader, model, readout,
                                    optimizer, loss_over_time, domain, info, toy_data=toy_data)
@@ -526,6 +532,7 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
         if toy_data and not virtual:
             data = data.squeeze(0)
         t_eval = data[0,:,0].view(-1).to(DEVICE)
+        t_eval.requires_grad = True
 
         # Ensure we have assigned the data and labels to the correct
         #  processing device
@@ -550,11 +557,11 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
         )
         # Compute the forward direction of the NODE with the dense domain for
         #  use in the mechanistic loss
-        dense_pred_y = None
-        if MECHANISTIC:
-            dense_pred_y = odeint(
-                model, y0, domain
-            ).squeeze().to(DEVICE)
+        # dense_pred_y = None
+        # if MECHANISTIC:
+        #     dense_pred_y = odeint(
+        #         model, y0, domain
+        #     ).squeeze().to(DEVICE)
         # We need to take the output_channels down to a single output, then
         #  we only need the last value (so the value after the entire depth of
         #  the network)
@@ -564,7 +571,67 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
 
         # Compute the loss based on the results
         # set_trace()
-        output = loss(pred_y, labels, dense_pred_y, domain, params)
+        output = loss(pred_y, labels, dense_pred_y=pred_y, domain=t_eval, params=params)
+
+        # This happens in place, so we don't need to return loss_over_time
+        loss_over_time.append((j, output.item()))
+
+        # Backpropagate through the adjoint of the NODE to compute gradients
+        #  WRT each parameter
+        output.backward()
+
+        # Use the gradients calculated through backpropagation to adjust the
+        #  parameters
+        optimizer.step()
+
+        # If this is the first iteration, or a multiple of 10, present the
+        #  user with a progress report
+        if (itr == 1) or (itr % 10 == 0):
+            print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
+
+
+def ann_training_epoch_mech(itr: int, loader: DataLoader, model: MechanisticANN,
+                            optimizer: optim.AdamW, loss_over_time: list,
+                            domain: torch.Tensor, params: dict, info: dict,
+                            toy_data: bool=False):
+
+    for j, (data, labels) in enumerate(loader):
+        domain = data[...,0].double()
+        domain.requires_grad = True
+        # Check how many patients are in the batch (as it may be less than
+        #  BATCH_SIZE if it's the last batch)
+        batch_size_ = data.size(0)
+        # Ensure we have assigned the data and labels to the correct
+        #  processing device
+        if CORT_ONLY:
+            # If we are only using CORT, we can discard the middle column as it
+            #  contains the ACTH concentrations
+            data = data[...,2]
+        elif toy_data and INPUT_CHANNELS == 2:
+            data = data[...,[2,3]]
+        else:
+            data = data[...,1:]
+        data = data.double().to(DEVICE)
+        labels = labels.to(DEVICE) if CLASSIFY else data
+
+        # Zero the gradient from the previous data
+        optimizer.zero_grad()
+
+        # We have to pass the domain transposed so that it treats each step
+        #  as a batch (unfortunately, mini-batch training is not available for
+        #  this architecture, I think)
+        pred_y = model(domain.view(-1,1))
+        # Remove the extraneous dimension from the output of the network so the
+        #  shape matches the labels
+        # We also need to reshape the output so that it has the number of
+        #  columns necessary
+        pred_y = pred_y.squeeze()
+
+        # Compute the loss based on the results
+        output = loss(
+            pred_y, labels=labels,
+            dense_pred_y=pred_y, domain=domain, params=params
+        )
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -618,7 +685,10 @@ def ann_training_epoch(itr: int, loader: DataLoader, model: ANN,
         pred_y = pred_y.squeeze(-1).reshape(-1, labels.size(1), labels.size(2))
 
         # Compute the loss based on the results
-        output = loss(pred_y, labels, domain)
+        output = loss(
+            pred_y, labels=labels,
+            dense_pred_y=pred_y, domain=domain
+        )
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -663,13 +733,13 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
 
         # We pass the data from the entire batch at once, shaped to fit the ANN
         pred_y = model(
-                data.reshape(batch_size_, INPUT_CHANNELS)
-                )
+            data.reshape(batch_size_, INPUT_CHANNELS)
+        )
         # Remove the extraneous dimension from the output of the network so the
         #  shape matches the labels
         pred_y = readout(pred_y).squeeze(-1).reshape(
-                -1, labels.size(1), labels.size(2)
-                ) if CLASSIFY else pred_y.squeeze(-1)
+            -1, labels.size(1), labels.size(2)
+        ) if CLASSIFY else pred_y.squeeze(-1)
 
         # Compute the loss based on the results
         output = loss(pred_y, labels, domain)
@@ -691,9 +761,9 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
             print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
 
 
-def loss(pred_y: torch.Tensor, labels: torch.Tensor,
+def loss(pred_y: torch.Tensor, labels: torch.Tensor=torch.ones((1,20,4)),
          dense_pred_y: torch.Tensor | None=None,
-         domain: torch.Tensor | None=None, params: dict={}):
+         domain: torch.Tensor | None=None, params: dict={}, **kwargs):
     """To compute the loss with potential mechanistic components"""
     if CLASSIFY:
         return binary_cross_entropy_with_logits(pred_y, labels)
@@ -703,12 +773,17 @@ def loss(pred_y: torch.Tensor, labels: torch.Tensor,
         # We loop through all of the patients in the batch and compute the
         #  mechanistic loss for each (I can probably get this to run in one
         #  shot, but this is easier for the moment).
-        for y in dense_pred_y.reshape(BATCH_SIZE, domain.size(0), INPUT_CHANNELS).to(DEVICE):
-            mech_loss = mechanistic_loss(y, domain, params)
-            mech_loss_total += mech_loss
+        if NETWORK_TYPE == 'NODE':
+            for y in dense_pred_y.reshape(BATCH_SIZE, domain.size(0), INPUT_CHANNELS if NETWORK_TYPE not in ['ANN', 'RNN'] else 0).to(DEVICE):
+                mech_loss = mechanistic_loss(y, domain, params)
+                mech_loss_total += mech_loss
+        else:
+            mech_loss = mechanistic_loss(dense_pred_y, domain, params)
+            mech_loss_total = mech_loss
         mech_loss = mech_loss_total/BATCH_SIZE
         data_loss = mse_loss(pred_y, labels.reshape(pred_y.shape))
-        return (mech_loss + data_loss)/2
+        ic_loss = mse_loss(torch.tensor([1., 7.14, 2.38, 2.]).double(), pred_y[...,0,:])
+        return (mech_loss + data_loss + ic_loss)/3
 
     return mse_loss(pred_y, labels.reshape(pred_y.shape))
 
@@ -718,36 +793,41 @@ def mechanistic_loss(dense_pred_y: torch.Tensor, domain: torch.Tensor,
     """Here we combine the predicted y with the mechanistic knowledge and then
     compute the loss against the experimental data"""
 
+    dense_pred_y = dense_pred_y.squeeze()
     pred_dy = torch.zeros_like(dense_pred_y).to(DEVICE)
-    pred_dy[:,0] = torch.autograd.grad(
+    pred_dy[...,0] = torch.autograd.grad(
         dense_pred_y[...,0], domain,
-        grad_outputs=torch.ones_like(domain).to(DEVICE),
+        grad_outputs=torch.ones_like(dense_pred_y[...,0]).to(DEVICE),
         retain_graph=True,
         create_graph=True,
     )[0]
-    pred_dy[:,1] = torch.autograd.grad(
+    pred_dy[...,1] = torch.autograd.grad(
         dense_pred_y[...,1], domain,
-        grad_outputs=torch.ones_like(domain),
+        grad_outputs=torch.ones_like(dense_pred_y[...,1]),
         retain_graph=True,
         create_graph=True
     )[0]
-    pred_dy[:,2] = torch.autograd.grad(
+    pred_dy[...,2] = torch.autograd.grad(
         dense_pred_y[...,2], domain,
-        grad_outputs=torch.ones_like(domain),
+        grad_outputs=torch.ones_like(dense_pred_y[...,2]),
         retain_graph=True,
         create_graph=True
     )[0]
-    pred_dy[:,3] = torch.autograd.grad(
+    pred_dy[...,3] = torch.autograd.grad(
         dense_pred_y[...,3], domain,
-        grad_outputs=torch.ones_like(domain),
+        grad_outputs=torch.ones_like(dense_pred_y[...,3]),
         retain_graph=True,
         create_graph=True
     )[0]
+
+    # Apologies for the mess here, but typing out ODEs in Python is a bit of a
+    #  chore
     mechanistic_dy = torch.zeros_like(dense_pred_y).to(DEVICE)
     mechanistic_dy[...,0] = params['k_stress']*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n2']))) - params['VS3']*(dense_pred_y[...,0]/(params['Km1'] + dense_pred_y[...,0])) - params['Kd1']*dense_pred_y[...,0]
     mechanistic_dy[...,1] = params['KP2']*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n2']))) - params['VS4']*(dense_pred_y[...,1]/(params['Km2'] + dense_pred_y[...,1])) - params['Kd2']*dense_pred_y[...,0]
     mechanistic_dy[...,2] = params['KP3']*dense_pred_y[...,0] - params['VS5']*(dense_pred_y[...,2]/(params['Km3'] + dense_pred_y[...,2])) - params['Kd3']*dense_pred_y[...,1]
-    mechanistic_dy[...,3] = params['Kb']*dense_pred_y[...,2]*(params['Gtot'] - dense_pred_y[...,3]) + params['VS2']*((dense_pred_y[...,3]**params['n1'])/(params['K1']**params['n1'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n1']))) - params['Kd5']*dense_pred_y[...,3]
+    mechanistic_dy[...,3] = params['Kb']*dense_pred_y[...,2]*(params['Gtot'] - dense_pred_y[...,3]) + params['VS2']*(torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n1'])/(params['K1']**params['n1'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n1']))) - params['Kd5']*dense_pred_y[...,3]
+
     return mse_loss(pred_dy, mechanistic_dy)
 
 
@@ -841,10 +921,11 @@ def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,
             f'smoothing{LABEL_SMOOTHING}_'
             f'dropout{DROPOUT}.txt'
         )
-    elif toy_dataset:
+    elif toy_data:
         filename = (
             f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
-            f'{group+"_" for group in PATIENT_GROUPS}_'
+            f'{PATIENT_GROUPS[0]}_'
+            f'{PATIENT_GROUPS[1]+"_" if len(PATIENT_GROUPS) > 1 else ""}'
             f'batchsize{BATCH_SIZE}_'
             f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
             f'smoothing{LABEL_SMOOTHING}_'
