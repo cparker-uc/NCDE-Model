@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Mon Sep 18, 2023 | 06:50P EDT
+# Last Modified: Wed Nov 29, 2023 | 10:07P EST
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -13,12 +13,17 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchcde
+import numpy as np
+from scipy.integrate import odeint
+from scipy.optimize import differential_evolution
 from torchviz import make_dot
-from typing import Any
-from torch.nn.functional import binary_cross_entropy_with_logits, mse_loss
-from torch.utils.data import DataLoader
-from torchdiffeq import odeint_adjoint as odeint
+from torch.nn.functional import (binary_cross_entropy_with_logits, mse_loss,
+                                 l1_loss)
+from torch.utils.data import DataLoader, Dataset
+from torchdiffeq import odeint_adjoint
+from torchcubicspline import (natural_cubic_spline_coeffs, NaturalCubicSpline)
 
+import matplotlib.pyplot as plt
 from neural_cde import NeuralCDE
 from neural_ode import NeuralODE
 from ann import ANN
@@ -33,12 +38,14 @@ from get_augmented_data import (FullVirtualPopulation,
 #  function will iterate through the parameter names passed in the
 #  parameter_dict argument and set values to these global variables for use in
 #  all of the functions in this namespace
+# I just set them here so that linters don't throw warnings
 # Network architecture parameters
 NETWORK_TYPE: str = ''
 INPUT_CHANNELS: int = 0
 HDIM: int = 0
 OUTPUT_CHANNELS: int = 0
-N_RECURS: int = 0 # Only for RNN
+N_LAYERS: int = 0 # Only for RNN
+SEQ_LENGTH: int = 0
 CLASSIFY: bool = True # For use in choosing between classification/prediction
 MECHANISTIC: bool = False # Should the mechanistic components be included?
 
@@ -68,6 +75,11 @@ T_END: int = 0
 
 # Define the device with which to train networks
 DEVICE = torch.device('cpu')
+
+
+# Flag to track whether we should be graphing the mechanistic and predicted dy
+#  on the current iteration
+GRAPH_FLAG:bool = False
 
 
 def train(hyperparameters: dict, virtual: bool=True,
@@ -124,7 +136,8 @@ def train(hyperparameters: dict, virtual: bool=True,
         run_training(model, loader, info)
 
 
-def train_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
+def train_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False,
+                 domain: torch.Tensor | None=None):
     loader, (t_steps, t_start, t_end, t_eval) = load_data(
         virtual, POP_NUMBER, ableson_pop=ableson_pop, toy_data=toy_data
     )
@@ -138,13 +151,32 @@ def train_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
         't_eval': t_eval,
     }
     model = model_init(info)
-    if MECHANISTIC:
-        params = param_init(model)
+
+    domain = torch.linspace(0, T_END, SEQ_LENGTH, requires_grad=True, dtype=torch.double).to(DEVICE)
+
+    if MECHANISTIC and not toy_data:
+        params = param_init_tsst(model)
         for key, val in params.items():
             model.register_parameter(key, val)
+        bounds = []
+        for key, val in params.items():
+            model.register_parameter(key, val)
+            val = val.item()
+            d = np.abs(val)*0.5
+            bounds.append((val-d, val+d))
+
+        for (data, _) in loader:
+            y0 = torch.cat([torch.tensor([0]), data[0,0,1:], torch.tensor([0])])
+            res = differential_evolution(de_loss, bounds, args=(data,y0), disp=True, maxiter=100)
+
+        for idx, val in enumerate(params.values()):
+            val = res.x[idx]
+
+    elif MECHANISTIC and toy_data:
+        params = param_init(model)
     else:
         params = {}
-    run_training(model, loader, info, params)
+    run_training(model, loader, info, params, domain=domain)
 
 
 def load_data(virtual: bool=True, pop_number: int=0,
@@ -167,7 +199,8 @@ def load_data(virtual: bool=True, pop_number: int=0,
             individual_number=INDIVIDUAL_NUMBER,
         ) if not ableson_pop else AblesonData(
             patient_groups=patient_groups,
-            normalize_standardize=NORMALIZE_STANDARDIZE
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+            individual_number=INDIVIDUAL_NUMBER,
         )
     elif toy_data:
         dataset = ToyDataset(
@@ -216,6 +249,10 @@ def load_data(virtual: bool=True, pop_number: int=0,
             ableson_combination=mdd_combination,
             test=test,
         )
+        # We set the last 3 time points to 0 if they are from the Nelson data
+        for idx,(p,_) in enumerate(dataset):
+            if p[-1,0] == 140:
+                dataset[idx][0][-3:,:] = -10
     else:
         dataset = FullVirtualPopulation(
             method=METHOD,
@@ -225,11 +262,16 @@ def load_data(virtual: bool=True, pop_number: int=0,
             control_combination=control_combination,
             mdd_combination=mdd_combination,
             test=test,
-            label_smoothing=LABEL_SMOOTHING
+            label_smoothing=LABEL_SMOOTHING,
         )
+        # We set the last 3 time points to 0 if they are from the Nelson data
+        for idx,(p,_) in enumerate(dataset):
+            if p[-1,0] == 140:
+                dataset[idx][0][-3:,:] = -10
+
     if not virtual and INDIVIDUAL_NUMBER:
-        t_steps = len(dataset[...,0])
-        t = dataset[0][0][...,0]
+        t_steps = len(dataset[0][0][...,0])
+        t = dataset[0][0][...,0].double()
         t_start = t[0]
         t_end = t[-1]
     else:
@@ -239,7 +281,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
         t_end = t[-1]
     loader = DataLoader(
         dataset=dataset, batch_size=BATCH_SIZE, shuffle=True,
-        num_workers=4
+        # num_workers=8
     )
     return loader, (t_steps, t_start, t_end, t)
 
@@ -267,8 +309,13 @@ def model_init(info: dict):
             device=DEVICE
         ).double()
     elif NETWORK_TYPE == 'RNN':
+        if MECHANISTIC:
+            return RNN(
+                INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS, N_LAYERS,
+                device=DEVICE,
+            ).double()
         return RNN(
-            INPUT_CHANNELS*t_steps, HDIM, N_RECURS,
+            INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS, N_LAYERS,
             device=DEVICE,
         ).double()
     else:
@@ -278,26 +325,28 @@ def model_init(info: dict):
 def param_init(model: nn.Module):
     """Initialize the parameters for the mechanistic loss, and set them to
     require gradient"""
-    k_stress = torch.nn.Parameter(torch.tensor(10.1, device=DEVICE), requires_grad=True)
-    Ki = torch.nn.Parameter(torch.tensor(1.51, device=DEVICE), requires_grad=True)
-    VS3 = torch.nn.Parameter(torch.tensor(3.25, device=DEVICE), requires_grad=False)
-    Km1 = torch.nn.Parameter(torch.tensor(1.74, device=DEVICE), requires_grad=False)
-    KP2 = torch.nn.Parameter(torch.tensor(8.3, device=DEVICE), requires_grad=False)
-    VS4 = torch.nn.Parameter(torch.tensor(0.907, device=DEVICE), requires_grad=False)
-    Km2 = torch.nn.Parameter(torch.tensor(0.112, device=DEVICE), requires_grad=False)
-    KP3 = torch.nn.Parameter(torch.tensor(0.945, device=DEVICE), requires_grad=False)
-    VS5 = torch.nn.Parameter(torch.tensor(0.00535, device=DEVICE), requires_grad=False)
-    Km3 = torch.nn.Parameter(torch.tensor(0.0768, device=DEVICE), requires_grad=False)
-    Kd1 = torch.nn.Parameter(torch.tensor(0.00379, device=DEVICE), requires_grad=False)
-    Kd2 = torch.nn.Parameter(torch.tensor(0.00916, device=DEVICE), requires_grad=False)
-    Kd3 = torch.nn.Parameter(torch.tensor(0.356, device=DEVICE), requires_grad=False)
-    n1 = torch.nn.Parameter(torch.tensor(5.43, device=DEVICE), requires_grad=False)
-    n2 = torch.nn.Parameter(torch.tensor(5.1, device=DEVICE), requires_grad=False)
-    Kb = torch.nn.Parameter(torch.tensor(0.0202, device=DEVICE), requires_grad=False)
-    Gtot = torch.nn.Parameter(torch.tensor(3.28, device=DEVICE), requires_grad=False)
-    VS2 = torch.nn.Parameter(torch.tensor(0.0509, device=DEVICE), requires_grad=False)
-    K1 = torch.nn.Parameter(torch.tensor(0.645, device=DEVICE), requires_grad=False)
-    Kd5 = torch.nn.Parameter(torch.tensor(0.0854, device=DEVICE), requires_grad=False)
+    k_stress = torch.nn.Parameter(torch.tensor(10.1, device=DEVICE, dtype=torch.float64), requires_grad=False)
+    Ki = torch.nn.Parameter(torch.tensor(1.51, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    VS3 = torch.nn.Parameter(torch.tensor(3.25, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    Km1 = torch.nn.Parameter(torch.tensor(1.74, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    KP2 = torch.nn.Parameter(torch.tensor(8.3, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    VS4 = torch.nn.Parameter(torch.tensor(0.907, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    Km2 = torch.nn.Parameter(torch.tensor(0.112, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    KP3 = torch.nn.Parameter(torch.tensor(0.945, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    VS5 = torch.nn.Parameter(torch.tensor(0.00535, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    Km3 = torch.nn.Parameter(torch.tensor(0.0768, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    Kd1 = torch.nn.Parameter(torch.tensor(0.00379, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    Kd2 = torch.nn.Parameter(torch.tensor(0.00916, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    Kd3 = torch.nn.Parameter(torch.tensor(0.356, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    n1 = torch.nn.Parameter(torch.tensor(5.43, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    n2 = torch.nn.Parameter(torch.tensor(5.1, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    Kb = torch.nn.Parameter(torch.tensor(0.0202, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    Gtot = torch.nn.Parameter(torch.tensor(3.28, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    VS2 = torch.nn.Parameter(torch.tensor(0.0509, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    K1 = torch.nn.Parameter(torch.tensor(0.645, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    Kd5 = torch.nn.Parameter(torch.tensor(0.0854, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    kdStress = torch.nn.Parameter(torch.tensor(0.19604, device=DEVICE), requires_grad=True)
+    stressStr = torch.nn.Parameter(torch.tensor(1., device=DEVICE), requires_grad=True)
 
     params = {
         'k_stress': k_stress,
@@ -319,7 +368,69 @@ def param_init(model: nn.Module):
         'Gtot': Gtot,
         'VS2': VS2,
         'K1': K1,
-        'Kd5': Kd5
+        'Kd5': Kd5,
+        'kdStress': kdStress,
+        'stressStr': stressStr,
+    }
+    for key, val in params.items():
+        model.register_parameter(key, val)
+
+    return params
+
+
+def param_init_tsst(model: nn.Module):
+    """Initialize the parameters for the mechanistic loss, and set them to
+    require gradient"""
+    R0CRH = torch.nn.Parameter(torch.tensor(-0.52239, device=DEVICE), requires_grad=False)
+    RCRH_CRH = torch.nn.Parameter(torch.tensor(0.97555, device=DEVICE), requires_grad=False)
+    RGR_CRH = torch.nn.Parameter(torch.tensor(-20.0241, device=DEVICE), requires_grad=False)
+    RSS_CRH = torch.nn.Parameter(torch.tensor(9.8594, device=DEVICE), requires_grad=False)
+    sigma = torch.nn.Parameter(torch.tensor(4.974, device=DEVICE), requires_grad=False)
+    tsCRH = torch.nn.Parameter(torch.tensor(0.10008, device=DEVICE), requires_grad=False)
+    R0ACTH = torch.nn.Parameter(torch.tensor(-0.29065, device=DEVICE), requires_grad=False)
+    RCRH_ACTH = torch.nn.Parameter(torch.tensor(16.006, device=DEVICE), requires_grad=False)
+    RGR_ACTH = torch.nn.Parameter(torch.tensor(-20.004, device=DEVICE), requires_grad=False)
+    tsACTH = torch.nn.Parameter(torch.tensor(0.046655, device=DEVICE), requires_grad=False)
+    R0CORT = torch.nn.Parameter(torch.tensor(-0.95265, device=DEVICE), requires_grad=False)
+    RACTH_CORT = torch.nn.Parameter(torch.tensor(0.022487, device=DEVICE), requires_grad=False)
+    tsCORT = torch.nn.Parameter(torch.tensor(0.048451, device=DEVICE), requires_grad=False)
+    R0GR = torch.nn.Parameter(torch.tensor(-0.49428, device=DEVICE), requires_grad=False)
+    RCORT_GR = torch.nn.Parameter(torch.tensor(0.02745, device=DEVICE), requires_grad=False)
+    RGR_GR = torch.nn.Parameter(torch.tensor(0.10572, device=DEVICE), requires_grad=False)
+    kdStress = torch.nn.Parameter(torch.tensor(0.19604, device=DEVICE), requires_grad=False)
+    MaxCRH = torch.nn.Parameter(torch.tensor(30., device=DEVICE), requires_grad=False)
+    MaxACTH = torch.nn.Parameter(torch.tensor(140.2386, device=DEVICE), requires_grad=False)
+    MaxCORT = torch.nn.Parameter(torch.tensor(30.3072, device=DEVICE), requires_grad=False)
+    BasalACTH = torch.nn.Parameter(torch.tensor(0.84733, device=DEVICE), requires_grad=False)
+    BasalCORT = torch.nn.Parameter(torch.tensor(0.29757, device=DEVICE), requires_grad=False)
+    ksGR = torch.nn.Parameter(torch.tensor(0.40732, device=DEVICE), requires_grad=False)
+    kdGR = torch.nn.Parameter(torch.tensor(0.39307, device=DEVICE), requires_grad=False)
+
+    params = {
+        'R0CRH': R0CRH,
+        'RCRH_CRH': RCRH_CRH,
+        'RGR_CRH': RGR_CRH,
+        'RSS_CRH': RSS_CRH,
+        'sigma': sigma,
+        'tsCRH': tsCRH,
+        'R0ACTH': R0ACTH,
+        'RCRH_ACTH': RCRH_ACTH,
+        'RGR_ACTH': RGR_ACTH,
+        'tsACTH': tsACTH,
+        'R0CORT': R0CORT,
+        'RACTH_CORT': RACTH_CORT,
+        'tsCORT': tsCORT,
+        'R0GR': R0GR,
+        'RCORT_GR': RCORT_GR,
+        'RGR_GR': RGR_GR,
+        'kdStress': kdStress,
+        'MaxCRH': MaxCRH,
+        'MaxACTH': MaxACTH,
+        'MaxCORT': MaxCORT,
+        'BasalACTH': BasalACTH,
+        'BasalCORT': BasalCORT,
+        'ksGR': ksGR,
+        'kdGR': kdGR,
     }
     for key, val in params.items():
         model.register_parameter(key, val)
@@ -328,16 +439,12 @@ def param_init(model: nn.Module):
 
 
 def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
-                 info: dict, params: dict={}):
+                 info: dict, params: dict={}, domain: torch.Tensor | None=None):
     """Run the training procedure for the given model and DataLoader"""
     virtual = info.get('virtual')
     control_combination = info.get('control_combination')
     mdd_combination = info.get('mdd_combination')
     toy_data = info.get('toy_data', False)
-
-    # For use with mechanistic loss, we need the gradient with respect to time
-    #  so we create a linspace and set requires_grad to True
-    domain = torch.linspace(0, T_END, 100, requires_grad=True).to(DEVICE)
 
     # Print which population we are using to train
     if not virtual and INDIVIDUAL_NUMBER:
@@ -364,14 +471,15 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
 
     loss_over_time = []
 
+
     # We need to define the readout layer outside of the loop so that it
     #  isn't reset each iteration
     # Only necessary for NODE and RNN
     readout = None
     if NETWORK_TYPE == 'NODE':
         readout = nn.Linear(OUTPUT_CHANNELS, 1).double().to(DEVICE)
-    elif NETWORK_TYPE == 'RNN':
-        readout = nn.Linear(HDIM, 1).double().to(DEVICE)
+    # elif NETWORK_TYPE == 'RNN':
+    #     readout = nn.Linear(HDIM, 1).double().to(DEVICE)
 
     for itr in range(1, ITERS+1):
         match NETWORK_TYPE:
@@ -395,8 +503,12 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
                     ann_training_epoch(itr, loader, model, optimizer, loss_over_time,
                                        domain, info, toy_data=toy_data)
             case 'RNN':
-                rnn_training_epoch(itr, loader, model, readout,
-                                   optimizer, loss_over_time, domain, info, toy_data=toy_data)
+                if MECHANISTIC:
+                    rnn_training_epoch_mech(itr, loader, model, readout, optimizer, loss_over_time,
+                                   domain, params, info, toy_data=toy_data)
+                else:
+                    rnn_training_epoch(itr, loader, model, readout,
+                                       optimizer, loss_over_time, domain, info, toy_data=toy_data)
             case _:
                 raise ValueError("NETWORK_TYPE must be one of NCDE, NODE, ANN, or RNN")
 
@@ -423,12 +535,68 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
             save_info.update(info)
             save_network(model, readout, optimizer, save_info)
 
+        global GRAPH_FLAG
+        global ITR
+        if (itr+1) % 1000 == 0:
+            GRAPH_FLAG = True
+            ITR = itr+1
+        else:
+            GRAPH_FLAG = False
+            ITR = itr+1
+
+
+class SplitBatchDataset(Dataset):
+    def __init__(self, data, labels):
+        super().__init__()
+        self.X = data
+        self.y = labels
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        return self.X[idx,...], self.y[idx]
+
+
 
 def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
                         optimizer: optim.AdamW, loss_over_time: list, domain: torch.Tensor,  info: dict,
                         toy_data: bool=False):
     t_eval = info.get('t_eval', [0,1])
+    global BATCH_SIZE
     for j, (data, labels) in enumerate(loader):
+        i = 0
+        nelson_idx = []
+        # Iterate through the patients in the current data and check whether
+        #  they have 0 in the last 3 time points (in which case they are
+        #  truncated Nelson data
+        for idx, pt in enumerate(data):
+            if -10 in pt[-3:,0]:
+                i += 1
+                nelson_idx.append(idx)
+        # If we have the same number of Nelson patients as patients in the
+        #  batch, we just cut the last 3 time points off all patients
+        if i == BATCH_SIZE:
+            data = data[:,:-3,:]
+        # Otherwise, split the dataset into Nelson and Ableson, then
+        #  recursively call ncde_training_epoch on the Nelson data with
+        #  BATCH_SIZE set i
+        elif i != 0:
+            batch_size_old = BATCH_SIZE
+            data_nelson = data[nelson_idx,:-3,:]
+            labels_nelson = labels[nelson_idx]
+            dataset_nelson = SplitBatchDataset(data_nelson, labels_nelson)
+            loader_nelson = DataLoader(dataset_nelson, batch_size=i)
+            BATCH_SIZE = i
+            ncde_training_epoch(
+                itr, loader_nelson, model, optimizer, loss_over_time, domain, info
+            )
+            BATCH_SIZE = batch_size_old
+            # Now that we've run the Nelson data, we just cut it out of the
+            #  currently loaded data and continue as usual
+            data = data[[i not in nelson_idx for i in range(BATCH_SIZE)],...]
+            labels = labels[[i not in nelson_idx for i in range(BATCH_SIZE)]]
+
         # Ensure we have assigned the data and labels to the correct
         #  processing device
         if CORT_ONLY:
@@ -443,7 +611,7 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         labels = labels.to(DEVICE) if CLASSIFY else data
         coeffs = torchcde.\
             hermite_cubic_coefficients_with_backward_differences(
-                data, t=t_eval
+                data, t=data[0,:,0]
             )
 
         # Zero the gradient from the previous data
@@ -552,14 +720,14 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
         optimizer.zero_grad()
 
         # Compute the forward direction of the NODE
-        pred_y = odeint(
-            model, y0, t_eval
+        pred_y = odeint_adjoint(
+            model, y0, t_eval, atol=ATOL, rtol=RTOL, method='dopri5'
         )
         # Compute the forward direction of the NODE with the dense domain for
         #  use in the mechanistic loss
         # dense_pred_y = None
         # if MECHANISTIC:
-        #     dense_pred_y = odeint(
+        #     dense_pred_y = odeint_adjoint(
         #         model, y0, domain
         #     ).squeeze().to(DEVICE)
         # We need to take the output_channels down to a single output, then
@@ -586,7 +754,7 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
 
         # If this is the first iteration, or a multiple of 10, present the
         #  user with a progress report
-        if (itr == 1) or (itr % 10 == 0):
+        if (itr == 1) or (itr % 100 == 0):
             print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
 
 
@@ -596,8 +764,8 @@ def ann_training_epoch_mech(itr: int, loader: DataLoader, model: MechanisticANN,
                             toy_data: bool=False):
 
     for j, (data, labels) in enumerate(loader):
-        domain = data[...,0].double()
-        domain.requires_grad = True
+        data_domain = data[...,0].double()
+        # data_domain.requires_grad = True
         # Check how many patients are in the batch (as it may be less than
         #  BATCH_SIZE if it's the last batch)
         batch_size_ = data.size(0)
@@ -617,21 +785,24 @@ def ann_training_epoch_mech(itr: int, loader: DataLoader, model: MechanisticANN,
         # Zero the gradient from the previous data
         optimizer.zero_grad()
 
-        # We have to pass the domain transposed so that it treats each step
-        #  as a batch (unfortunately, mini-batch training is not available for
-        #  this architecture, I think)
-        pred_y = model(domain.view(-1,1))
+        # We run the model twice. Once with the time steps from the data points
+        #  for the data loss, then again with a more dense selection of time
+        #  steps over the domain
+        pred_y = model(data_domain.view(-1,1))
         # Remove the extraneous dimension from the output of the network so the
         #  shape matches the labels
-        # We also need to reshape the output so that it has the number of
-        #  columns necessary
         pred_y = pred_y.squeeze()
+
+        # Repeat for the dense predictions
+        dense_pred_y = model(domain.double().view(-1,1))
 
         # Compute the loss based on the results
         output = loss(
             pred_y, labels=labels,
-            dense_pred_y=pred_y, domain=domain, params=params
+            dense_pred_y=dense_pred_y, domain=domain, params=params
         )
+        (mech_loss, data_loss, ic_loss) = output
+        output = (mech_loss + data_loss + ic_loss)/3
 
         # This happens in place, so we don't need to return loss_over_time
         loss_over_time.append((j, output.item()))
@@ -647,7 +818,11 @@ def ann_training_epoch_mech(itr: int, loader: DataLoader, model: MechanisticANN,
         # If this is the first iteration, or a multiple of 10, present the
         #  user with a progress report
         if (itr == 1) or (itr % 10 == 0):
+            print(f"{mech_loss=}")
+            print(f"{data_loss=}")
+            print(f"{ic_loss=}")
             print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
+        # print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
 
 
 def ann_training_epoch(itr: int, loader: DataLoader, model: ANN,
@@ -707,6 +882,91 @@ def ann_training_epoch(itr: int, loader: DataLoader, model: ANN,
             print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f}")
 
 
+def rnn_training_epoch_mech(itr: int, loader: DataLoader, model: RNN,
+                            readout: nn.Linear, optimizer: optim.AdamW,
+                            loss_over_time: list, domain: torch.Tensor,
+                            params: dict, info: dict, toy_data: bool=False):
+
+    for j, (data, labels) in enumerate(loader):
+        data_domain = data[...,0].contiguous()
+
+        # Ensure we have assigned the data and labels to the correct
+        #  processing device
+        if CORT_ONLY:
+            # If we are only using CORT, we can discard the middle column as it
+            #  contains the ACTH concentrations
+            data = data[...,2]
+        elif toy_data and INPUT_CHANNELS == 2:
+            data = data[...,[2,3]]
+        else:
+            data = data[...,1:]
+        data = data.to(DEVICE)
+        labels = data
+
+        data = data.to(torch.double)
+        labels = labels.to(torch.double)
+
+        # Let's create a spline over the data points and then use that to compute
+        #  the data loss (so that we can force points in between datapoints to
+        #  more closely align)
+        coeffs = natural_cubic_spline_coeffs(data_domain.squeeze(), labels)
+        spline = NaturalCubicSpline(coeffs)
+        info.update({'spline': spline})
+
+        # Zero the gradient from the previous data
+        optimizer.zero_grad()
+
+        # We pass the data from the entire batch at once, shaped to fit the ANN
+
+        # We run the model twice. Once with the time steps from the data points
+        #  for the data loss, then again with a more dense selection of time
+        #  steps over the domain
+        # pred_y = model(data_domain.view(-1,1)).squeeze()
+
+        # for using only the datapoints for the data loss, rather than a spline
+        # def find_nearest(array, value):
+        #     idx = (torch.abs(array-value)).argmin()
+        #     return idx
+
+        # Repeat for the dense predictions
+        pred_y = model(domain.view(-1,1))
+        labels = spline.evaluate(domain)
+        # pred_y_datapoints = pred_y[[find_nearest(domain, t) for t in data_domain.squeeze()],...]
+
+        # if loss_over_time and loss_over_time[-1][1] <= 1:
+        #     set_trace()
+
+        # Compute the loss based on the results
+        output = loss(
+            # pred_y_datapoints, labels=labels,
+            pred_y, labels=labels,
+            dense_pred_y=pred_y, domain=domain,
+            params=params, info=info
+        )
+        if not toy_data:
+            (mech_loss, data_loss, ic_loss) = output
+            output = (3*mech_loss + data_loss)/4
+        else:
+            (mech_loss, data_loss, ic_loss) = output
+            output = (mech_loss + data_loss + ic_loss)/3
+
+        # This happens in place, so we don't need to return loss_over_time
+        loss_over_time.append((j, output.item()))
+
+        # Backpropagate through the adjoint of the NODE to compute gradients
+        #  WRT each parameter
+        output.backward(retain_graph=True)
+
+        # Use the gradients calculated through backpropagation to adjust the
+        #  parameters
+        optimizer.step()
+
+        # If this is the first iteration, or a multiple of 10, present the
+        #  user with a progress report
+        if (itr == 1) or (itr % 10 == 0):
+            print(f"Iter {itr:04d} Batch {j}: loss = {output.item():.6f} (mech_loss = {mech_loss.item():.6f}, data_loss = {data_loss.item():.6f}, ic_loss = {ic_loss.item() if ic_loss else 0:.6f})")
+
+
 def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
                        readout: nn.Linear, optimizer: optim.AdamW,
                        loss_over_time: list, domain: torch.Tensor, info: dict, toy_data: bool=False):
@@ -763,8 +1023,11 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
 
 def loss(pred_y: torch.Tensor, labels: torch.Tensor=torch.ones((1,20,4)),
          dense_pred_y: torch.Tensor | None=None,
-         domain: torch.Tensor | None=None, params: dict={}, **kwargs):
+         domain: torch.Tensor | None=None,
+         params: dict={}, info: dict={}, **kwargs):
     """To compute the loss with potential mechanistic components"""
+    toy_data = info.get('toy_data', False)
+    spline = info.get('spline')
     if CLASSIFY:
         return binary_cross_entropy_with_logits(pred_y, labels)
 
@@ -775,65 +1038,229 @@ def loss(pred_y: torch.Tensor, labels: torch.Tensor=torch.ones((1,20,4)),
         #  shot, but this is easier for the moment).
         if NETWORK_TYPE == 'NODE':
             for y in dense_pred_y.reshape(BATCH_SIZE, domain.size(0), INPUT_CHANNELS if NETWORK_TYPE not in ['ANN', 'RNN'] else 0).to(DEVICE):
-                mech_loss = mechanistic_loss(y, domain, params)
+                mech_loss = mechanistic_loss(y, domain, params, info)
                 mech_loss_total += mech_loss
+        elif not toy_data:
+            mech_loss = mechanistic_loss_tsst(dense_pred_y, domain, params, info)
+            mech_loss_total = mech_loss
         else:
-            mech_loss = mechanistic_loss(dense_pred_y, domain, params)
+            mech_loss = mechanistic_loss(dense_pred_y, domain, params, info)
             mech_loss_total = mech_loss
         mech_loss = mech_loss_total/BATCH_SIZE
-        data_loss = mse_loss(pred_y, labels.reshape(pred_y.shape))
-        ic_loss = mse_loss(torch.tensor([1., 7.14, 2.38, 2.]).double(), pred_y[...,0,:])
-        return (mech_loss + data_loss + ic_loss)/3
 
-    return mse_loss(pred_y, labels.reshape(pred_y.shape))
+        labels = labels.squeeze()
+
+        data_loss = l1_loss(dense_pred_y if toy_data else pred_y[...,[1,2]], labels)
+        if GRAPH_FLAG:
+            graph_data_loss(domain, pred_y, dense_pred_y, labels, spline)
+        ic_loss = l1_loss(torch.tensor([1, 7.14, 2.38, 2]), pred_y[...,0,:]) if toy_data else None
+        return (mech_loss, data_loss, ic_loss)
+
+    return l1_loss(pred_y, labels.reshape(pred_y.shape))
+        # data_loss = mse_loss(dense_pred_y if toy_data else pred_y[...,[1,2]], labels)
+        # if GRAPH_FLAG:
+        #     graph_data_loss(domain, pred_y, dense_pred_y, labels, spline)
+        # ic_loss = mse_loss(torch.tensor([1, 7.14, 2.38, 2]), pred_y[...,0,:]) if toy_data else None
+        # return (mech_loss, data_loss, ic_loss)
+
+    # return mse_loss(pred_y, labels.reshape(pred_y.shape))
 
 
-def mechanistic_loss(dense_pred_y: torch.Tensor, domain: torch.Tensor,
-                     params: dict):
+# def mechanistic_loss(pred_crh: torch.Tensor, pred_acth: torch.Tensor,
+#                      pred_cort: torch.Tensor, pred_gr: torch.Tensor,
+#                      domain: torch.Tensor, params: dict):
+def mechanistic_loss(pred_y, domain, params, info):
     """Here we combine the predicted y with the mechanistic knowledge and then
     compute the loss against the experimental data"""
-
-    dense_pred_y = dense_pred_y.squeeze()
-    pred_dy = torch.zeros_like(dense_pred_y).to(DEVICE)
+    pred_dy = torch.zeros_like(pred_y).to(DEVICE)
     pred_dy[...,0] = torch.autograd.grad(
-        dense_pred_y[...,0], domain,
-        grad_outputs=torch.ones_like(dense_pred_y[...,0]).to(DEVICE),
+        pred_y[...,0], domain,
+        grad_outputs=torch.ones_like(domain),
         retain_graph=True,
         create_graph=True,
     )[0]
     pred_dy[...,1] = torch.autograd.grad(
-        dense_pred_y[...,1], domain,
-        grad_outputs=torch.ones_like(dense_pred_y[...,1]),
+        pred_y[...,1], domain,
+        grad_outputs=torch.ones_like(domain),
         retain_graph=True,
-        create_graph=True
+        create_graph=True,
     )[0]
     pred_dy[...,2] = torch.autograd.grad(
-        dense_pred_y[...,2], domain,
-        grad_outputs=torch.ones_like(dense_pred_y[...,2]),
+        pred_y[...,2], domain,
+        grad_outputs=torch.ones_like(domain),
         retain_graph=True,
-        create_graph=True
+        create_graph=True,
     )[0]
     pred_dy[...,3] = torch.autograd.grad(
-        dense_pred_y[...,3], domain,
-        grad_outputs=torch.ones_like(dense_pred_y[...,3]),
+        pred_y[...,3], domain,
+        grad_outputs=torch.ones_like(domain),
         retain_graph=True,
-        create_graph=True
+        create_graph=True,
     )[0]
 
     # Apologies for the mess here, but typing out ODEs in Python is a bit of a
     #  chore
-    mechanistic_dy = torch.zeros_like(dense_pred_y).to(DEVICE)
-    mechanistic_dy[...,0] = params['k_stress']*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n2']))) - params['VS3']*(dense_pred_y[...,0]/(params['Km1'] + dense_pred_y[...,0])) - params['Kd1']*dense_pred_y[...,0]
-    mechanistic_dy[...,1] = params['KP2']*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n2']))) - params['VS4']*(dense_pred_y[...,1]/(params['Km2'] + dense_pred_y[...,1])) - params['Kd2']*dense_pred_y[...,0]
-    mechanistic_dy[...,2] = params['KP3']*dense_pred_y[...,0] - params['VS5']*(dense_pred_y[...,2]/(params['Km3'] + dense_pred_y[...,2])) - params['Kd3']*dense_pred_y[...,1]
-    mechanistic_dy[...,3] = params['Kb']*dense_pred_y[...,2]*(params['Gtot'] - dense_pred_y[...,3]) + params['VS2']*(torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n1'])/(params['K1']**params['n1'] + torch.sign(dense_pred_y[...,3])*(torch.abs(dense_pred_y[...,3])**params['n1']))) - params['Kd5']*dense_pred_y[...,3]
+    stress = torch.zeros_like(domain, requires_grad=False)
+    for idx, t in enumerate(domain):
+        if t < 30:
+            stress[idx] = 0
+            continue
+        stress[idx] = params['stressStr']*torch.exp(-params['kdStress']*(t-30))
+    mechanistic_dcrh = torch.abs(stress)*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(pred_y[...,3])*(torch.abs(pred_y[...,3])**params['n2']))) - params['VS3']*(pred_y[...,0]/(params['Km1'] + pred_y[...,0])) - params['Kd1']*pred_y[...,0]
+    mechanistic_dacth = params['KP2']*pred_y[...,0]*((params['Ki']**params['n2'])/(params['Ki']**params['n2'] + torch.sign(pred_y[...,3])*(torch.abs(pred_y[...,3])**params['n2']))) - params['VS4']*(pred_y[...,1]/(params['Km2'] + pred_y[...,0])) - params['Kd2']*pred_y[...,0]
+    mechanistic_dcort = params['KP3']*pred_y[...,1] - params['VS5']*(pred_y[...,2]/(params['Km3'] + pred_y[...,2])) - params['Kd3']*pred_y[...,2]
+    mechanistic_dgr = params['Kb']*pred_y[...,2]*(params['Gtot'] - pred_y[...,3]) + params['VS2']*(torch.sign(pred_y[...,3])*(torch.abs(pred_y[...,3])**params['n1'])/(params['K1']**params['n1'] + torch.sign(pred_y[...,3])*(torch.abs(pred_y[...,3])**params['n1']))) - params['Kd5']*pred_y[...,3]
+    mechanistic_dy = torch.cat([mechanistic_dcrh.view(-1,1), mechanistic_dacth.view(-1,1), mechanistic_dcort.view(-1,1), mechanistic_dgr.view(-1,1)], dim=1)
+
+    if GRAPH_FLAG:
+        graph_mech_loss(domain, pred_dy, mechanistic_dy)
 
     return mse_loss(pred_dy, mechanistic_dy)
 
 
-def stress(domain):
-    """Placeholder for adding stress to the system"""
-    return 5
+def mechanistic_loss_tsst(pred_y, domain, params, info):
+    """Here we combine the predicted y with the mechanistic knowledge and then
+    compute the loss against the experimental data"""
+    stress = info.get('stress', torch.zeros_like(domain))
+
+    pred_dy = torch.zeros_like(pred_y).to(DEVICE)
+    pred_dy[...,0] = torch.autograd.grad(
+        pred_y[...,0], domain,
+        grad_outputs=torch.ones_like(domain),
+        retain_graph=True,
+        create_graph=True,
+    )[0]
+    pred_dy[...,1] = torch.autograd.grad(
+        pred_y[...,1], domain,
+        grad_outputs=torch.ones_like(domain),
+        retain_graph=True,
+        create_graph=True,
+    )[0]
+    pred_dy[...,2] = torch.autograd.grad(
+        pred_y[...,2], domain,
+        grad_outputs=torch.ones_like(domain),
+        retain_graph=True,
+        create_graph=True,
+    )[0]
+    pred_dy[...,3] = torch.autograd.grad(
+        pred_y[...,3], domain,
+        grad_outputs=torch.ones_like(domain),
+        retain_graph=True,
+        create_graph=True,
+    )[0]
+
+    # Apologies for the mess here, but typing out ODEs in Python is a bit of a
+    #  chore
+    stress = torch.zeros_like(domain, requires_grad=False)
+    for idx, t in enumerate(domain):
+        if t < 30:
+            stress[idx] = 0
+            continue
+        stress[idx] = torch.exp(-params['kdStress']*(t-30))
+    wCRH = params['R0CRH'] + params['RCRH_CRH']*pred_y[...,0] \
+        + params['RSS_CRH']*torch.abs(stress.squeeze()) + params['RGR_CRH']*pred_y[...,3]
+    FCRH = (params['MaxCRH']*params['tsCRH'])/(1 + torch.exp(-params['sigma']*wCRH))
+    mechanistic_dcrh = FCRH - params['tsCRH']*pred_y[...,0]
+
+    wACTH = params['R0ACTH'] + params['RCRH_ACTH']*pred_y[...,0] \
+        + params['RGR_ACTH']*pred_y[...,3]
+    FACTH = (params['MaxACTH']*params['tsACTH'])/(1 + torch.exp(-params['sigma']*wACTH)) + params['BasalACTH']
+    mechanistic_dacth = FACTH - params['tsACTH']*pred_y[...,1]
+
+    wCORT = params['R0CORT'] + params['RACTH_CORT']*pred_y[...,1]
+    FCORT = (params['MaxCORT']*params['tsCORT'])/(1 + torch.exp(-params['sigma']*wCORT)) + params['BasalCORT']
+    mechanistic_dcort = FCORT - params['tsCORT']*pred_y[...,2]
+
+    wGR = params['R0GR'] + params['RCORT_GR']*pred_y[...,2] + params['RGR_GR']*pred_y[...,3]
+    FGR = params['ksGR']/(1 + torch.exp(-params['sigma']*wGR))
+    mechanistic_dgr = FGR - params['kdGR']*pred_y[...,3]
+
+    mechanistic_dy = torch.cat([mechanistic_dcrh.view(-1,1), mechanistic_dacth.view(-1,1), mechanistic_dcort.view(-1,1), mechanistic_dgr.view(-1,1)], dim=1)
+
+    if GRAPH_FLAG:
+        graph_mech_loss(domain, pred_dy, mechanistic_dy)
+
+
+    return l1_loss(pred_dy, mechanistic_dy)
+
+
+def graph_mech_loss(domain: torch.tensor, pred_dy: torch.tensor, mechanistic_dy: torch.tensor) -> None:
+    with torch.no_grad():
+        fig, axes = plt.subplots(nrows=4, figsize=(10,8))
+        for idx in range(pred_dy.shape[-1]):
+            axes[idx].plot(domain, pred_dy[...,idx], label='Predicted dy')
+            axes[idx].plot(domain, mechanistic_dy[...,idx], label='Mechanistic dy')
+            axes[idx].legend(fancybox=True, shadow=True, loc='upper right')
+        plt.savefig(f'Results/pred_dy_vs_mech_dy_{ITR}ITERS_{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}.png', dpi=300)
+        plt.close(fig)
+
+
+def graph_data_loss(domain: torch.tensor, pred_y: torch.tensor, dense_pred_y: torch.tensor, labels: torch.tensor, spline) -> None:
+    with torch.no_grad():
+        fig, axes = plt.subplots(nrows=2, figsize=(10,8))
+        for idx in range(labels.shape[-1]):
+            axes[idx].plot(domain, pred_y[...,idx+1], label='Predicted y')
+            # axes[idx].plot(domain, dense_pred_y[...,idx+1], label='Dense Predicted y')
+            axes[idx].plot(domain, labels[...,idx], label='Data y')
+            axes[idx].legend(fancybox=True, shadow=True, loc='upper right')
+        plt.savefig(f'Results/pred_y_vs_data_{ITR}ITERS_{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}.png', dpi=300)
+        plt.close(fig)
+
+
+def de_func(params, y0):
+    """ODE System computation for the differential_evolution runs"""
+    if isinstance(params, dict):
+        vals = []
+        for _, val in params.items():
+            vals.append(val.item())
+        [R0CRH, RCRH_CRH, RGR_CRH, RSS_CRH, sigma, tsCRH, R0ACTH, RCRH_ACTH, RGR_ACTH, tsACTH, R0CORT, RACTH_CORT, tsCORT, R0GR, RCORT_GR, RGR_GR, kdStress, MaxCRH, MaxACTH, MaxCORT, BasalACTH, BasalCORT, ksGR, kdGR] = vals
+    else:
+        [R0CRH, RCRH_CRH, RGR_CRH, RSS_CRH, sigma, tsCRH, R0ACTH, RCRH_ACTH, RGR_ACTH, tsACTH, R0CORT, RACTH_CORT, tsCORT, R0GR, RCORT_GR, RGR_GR, kdStress, MaxCRH, MaxACTH, MaxCORT, BasalACTH, BasalCORT, ksGR, kdGR] = params
+    """This function solves the system to find the true mechanistic component
+    for graphing."""
+    def stress(t):
+        if t < 30:
+            return 0
+        return np.exp(-kdStress*(t-30))
+    def ode_rhs(y, t):
+        dy = np.zeros(4)
+
+        # Apologies for the mess here, but typing out ODEs in Python is a bit of a
+        #  chore
+        wCRH = R0CRH + RCRH_CRH*y[0] \
+            + RSS_CRH*stress(t) + RGR_CRH*y[3]
+        FCRH = (MaxCRH*tsCRH)/(1 + np.exp(-sigma*wCRH))
+        dy[0] = FCRH - tsCRH*y[0]
+
+        wACTH = R0ACTH + RCRH_ACTH*y[0] \
+            + RGR_ACTH*y[3]
+        FACTH = (MaxACTH*tsACTH)/(1 + np.exp(-sigma*wACTH)) + BasalACTH
+        dy[1] = FACTH - tsACTH*y[1]
+
+        wCORT = R0CORT + RACTH_CORT*y[1]
+        FCORT = (MaxCORT*tsCORT)/(1 + np.exp(-sigma*wCORT)) + BasalCORT
+        dy[2] = FCORT - tsCORT*y[2]
+
+        wGR = R0GR + RCORT_GR*y[2] + RGR_GR*y[3]
+        FGR = ksGR/(1 + np.exp(sigma*wGR))
+        dy[3] = FGR - kdGR*y[3]
+        return dy
+
+    t_eval = torch.tensor((0, 15, 30, 40, 50, 65, 80, 95, 110, 125, 140))
+    gflow = odeint(ode_rhs, y0, t_eval)
+    gflow = np.concatenate((t_eval.view(-1,1), gflow), axis=1)
+    gflow = torch.from_numpy(gflow)
+    return gflow
+
+
+def de_loss(params, patient, y0):
+    """Loss for the differential_evolution computations"""
+    gflow = de_func(params, y0)
+
+    mse = gflow[:,[2,3]] - patient[...,1:]
+    mse = mse**2
+    mse = torch.mean(mse)
+    return mse
 
 
 def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,
@@ -859,7 +1286,7 @@ def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,
         directory = (
             f'Network States/'
             f'{"Classification" if CLASSIFY else "Prediction"}/'
-            f'{PATIENT_GROUPS[0]}/'
+            f'{PATIENT_GROUPS[0] if not toy_data else "Toy Dataset"}/'
         )
     elif not virtual:
         directory = (
@@ -894,7 +1321,18 @@ def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,
         os.makedirs(directory)
 
     # Set the filename for the network state_dict
-    if INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+    if toy_data:
+        filename = (
+            f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+            f'{PATIENT_GROUPS[0]}_'
+            f'{PATIENT_GROUPS[1]+"_" if len(PATIENT_GROUPS) > 1 else ""}'
+            f'batchsize{BATCH_SIZE}_'
+            f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+            f'smoothing{LABEL_SMOOTHING}_'
+            f'dropout{DROPOUT}_{T_END}hrs'
+            f'{"_irregularSamples" if IRREGULAR_T_SAMPLES else ""}.txt'
+        )
+    elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
         filename = (
             f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
             f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
@@ -920,17 +1358,6 @@ def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,
             f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
             f'smoothing{LABEL_SMOOTHING}_'
             f'dropout{DROPOUT}.txt'
-        )
-    elif toy_data:
-        filename = (
-            f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
-            f'{PATIENT_GROUPS[0]}_'
-            f'{PATIENT_GROUPS[1]+"_" if len(PATIENT_GROUPS) > 1 else ""}'
-            f'batchsize{BATCH_SIZE}_'
-            f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
-            f'smoothing{LABEL_SMOOTHING}_'
-            f'dropout{DROPOUT}_{T_END}hrs'
-            f'{"_irregularSamples" if IRREGULAR_T_SAMPLES else ""}.txt'
         )
     else:
         filename = (
@@ -973,7 +1400,7 @@ def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,
             '{PATIENT_GROUPS} Trained Network:\n\n'
         )
         file.write(
-            '{NETWORK_TYPE} Network Architecture Parameters\n'
+            f'{NETWORK_TYPE} Network Architecture Parameters\n'
             f'Input channels={INPUT_CHANNELS}\n'
             f'Hidden channels={HDIM}\n'
             f'Output channels={OUTPUT_CHANNELS}\n\n'

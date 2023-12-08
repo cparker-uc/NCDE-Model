@@ -1,12 +1,13 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Mon Sep 18, 2023 | 06:38P EDT
+# Last Modified: Wed Nov 29, 2023 | 01:14P EST
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
 
 import os
+from IPython.core.debugger import set_trace
 import torch
 import torch.nn as nn
 import torchcde
@@ -17,7 +18,8 @@ from copy import copy
 
 from torch.utils.data import DataLoader
 from torch.nn.functional import binary_cross_entropy_with_logits, mse_loss
-from torchdiffeq import odeint_adjoint as odeint
+from torchdiffeq import odeint_adjoint
+from scipy.integrate import odeint
 
 from neural_cde import NeuralCDE
 from neural_ode import NeuralODE
@@ -32,13 +34,14 @@ from get_augmented_data import (FullVirtualPopulation,
 #  function will iterate through the parameter names passed in the
 #  parameter_dict argument and set values to these global variables for use in
 #  all of the functions in this namespace
+# I just set them here so that linters don't throw warnings
 # Network architecture parameters
 NETWORK_TYPE: str = ''
 INPUT_CHANNELS: int = 0
 HDIM: int = 0
 OUTPUT_CHANNELS: int = 0
-# Only necessary for RNN
-N_RECURS: int = 0
+N_LAYERS: int = 0 # Only for RNN
+SEQ_LENGTH: int = 0
 CLASSIFY: bool = True # For use in choosing between classification/prediction
 MECHANISTIC: bool = False # Should the mechanistic components be included?
 
@@ -57,18 +60,17 @@ INDIVIDUAL_NUMBER: int = 0
 METHOD: str = ''
 NORMALIZE_STANDARDIZE: str = ''
 NOISE_MAGNITUDE: float = 0.
-IRREGULAR_T_SAMPLES = True
+IRREGULAR_T_SAMPLES: bool = False
 NUM_PER_PATIENT: int = 0
 POP_NUMBER: int = 0
 BATCH_SIZE: int = 0
 LABEL_SMOOTHING: float = 0.
 DROPOUT: float = 0.
 CORT_ONLY: bool = False
-MAX_ITR: int = 1
 T_END: int = 0
 
 # Define the device with which to train networks
-DEVICE:torch.device = torch.device('cpu')
+DEVICE = torch.device('cpu')
 
 
 def test(hyperparameters: dict, virtual: bool=True,
@@ -129,9 +131,15 @@ def test(hyperparameters: dict, virtual: bool=True,
             elif NETWORK_TYPE == 'NODE':
                 classification_node_testing(model, loader, info) if CLASSIFY else prediction_node_testing(model, loader, info)
             elif NETWORK_TYPE == 'ANN':
-                classification_ann_testing(model, loader, info) if CLASSIFY else prediction_ann_testing(model, loader, info)
+                if MECHANISTIC:
+                    prediction_ann_testing_mechanistic(model, loader, info)
+                else:
+                    classification_ann_testing(model, loader, info) if CLASSIFY else prediction_ann_testing(model, loader, info)
             elif NETWORK_TYPE == 'RNN':
-                classification_rnn_testing(model, loader, info) if CLASSIFY else prediction_rnn_testing(model, loader, info)
+                if MECHANISTIC:
+                    prediction_rnn_testing_mechanistic(model, loader, info)
+                else:
+                    classification_rnn_testing(model, loader, info) if CLASSIFY else prediction_rnn_testing(model, loader, info)
             else:
                 raise ValueError(
                     "NETWORK_TYPE must be one of: NCDE, NODE or ANN"
@@ -165,7 +173,10 @@ def test_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
             else:
                 classification_ann_testing(model, loader, info) if CLASSIFY else prediction_ann_testing(model, loader, info)
         elif NETWORK_TYPE == 'RNN':
-            classification_rnn_testing(model, loader, info) if CLASSIFY else prediction_rnn_testing(model, loader, info)
+            if MECHANISTIC:
+                prediction_rnn_testing_mechanistic(model, loader, info)
+            else:
+                classification_rnn_testing(model, loader, info) if CLASSIFY else prediction_rnn_testing(model, loader, info)
         else:
             raise ValueError(
                 "NETWORK_TYPE must be one of: NCDE, NODE or ANN"
@@ -192,7 +203,8 @@ def load_data(virtual: bool=True, pop_number: int=0,
             individual_number=INDIVIDUAL_NUMBER,
         ) if not ableson_pop else AblesonData(
             patient_groups=copy(patient_groups),
-            normalize_standardize=NORMALIZE_STANDARDIZE
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+            individual_number=INDIVIDUAL_NUMBER,
         )
     elif toy_data:
         dataset = ToyDataset(
@@ -263,7 +275,6 @@ def load_data(virtual: bool=True, pop_number: int=0,
 
 
 def model_init(info: dict):
-    toy_data = info.get('toy_data', False)
     t_steps = info.get('t_steps', 11)
     t_start = info.get('t_start', 0)
     t_end = info.get('t_end', 1)
@@ -291,9 +302,14 @@ def model_init(info: dict):
             device=DEVICE,
         ).double()
     if NETWORK_TYPE == 'RNN':
+        if MECHANISTIC:
+            return RNN(
+                INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
+                N_LAYERS, device=DEVICE,
+            )
         return RNN(
-            INPUT_CHANNELS*t_steps, HDIM,
-            N_RECURS, device=DEVICE,
+            INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
+            N_LAYERS
         ).double()
     raise ValueError("NETWORK_TYPE unsupported")
 
@@ -389,8 +405,7 @@ def classification_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict
 
     # Loop over the state dictionaries based on the number of iterations, from
     #  100 to MAX_ITR*100
-    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
-    print(f"{n_saves=}")
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
         if virtual:
@@ -402,7 +417,7 @@ def classification_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict
                 f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
                 f'{NUM_PER_PATIENT}perPatient_'
                 f'batchsize{BATCH_SIZE}_'
-                f'{itr*100}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
                 f'smoothing{LABEL_SMOOTHING}_'
                 f'dropout{DROPOUT}'
                 f'{"_byLab" if by_lab else ""}.txt'
@@ -593,7 +608,7 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
 
     # Loop over the state dictionaries based on the number of iterations, from
     #  100 to MAX_ITR*100
-    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
         if virtual:
@@ -645,7 +660,7 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
         state_dict = torch.load(state_filepath, map_location=DEVICE)
         readout_state_dict = torch.load(readout_filepath, map_location=DEVICE)
         model.load_state_dict(state_dict)
-        readout = nn.Linear(OUTPUT_CHANNELS, 1)
+        readout = nn.Linear(OUTPUT_CHANNELS, 1).double()
         readout.load_state_dict(readout_state_dict)
 
         # Pandas Series to allow us to insert the number of iterations for each
@@ -668,7 +683,7 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
             y0 = data[:,0,1:]
 
             # Compute the forward direction of the NODE
-            pred_y = odeint(
+            pred_y = odeint_adjoint(
                 model, y0, t_eval
             )
             # We need to take the output_channels down to a single output, then
@@ -815,7 +830,7 @@ def classification_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict)
 
     # Loop over the state dictionaries based on the number of iterations, from
     #  100 to MAX_ITR*100
-    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
         if virtual:
@@ -1026,7 +1041,7 @@ def classification_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict)
 
     # Loop over the state dictionaries based on the number of iterations, from
     #  100 to MAX_ITR*100
-    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
         if virtual:
@@ -1243,7 +1258,7 @@ def prediction_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
 
     # Loop over the state dictionaries based on the number of iterations, from
     #  100 to MAX_ITR*100
-    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
         if virtual:
@@ -1352,6 +1367,8 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
     #  combinations)
     if control_combination:
         index = control_combination+mdd_combination
+    elif ableson_pop and INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+        index = [INDIVIDUAL_NUMBER]
     elif ableson_pop:
         index = [i for i in range(50)]
     elif toy_data and len(PATIENT_GROUPS) == 1:
@@ -1366,7 +1383,9 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
 
     tmp_index = []
     for i, entry in enumerate(index):
-        if ableson_pop:
+        if ableson_pop and len(PATIENT_GROUPS) == 1:
+            t = PATIENT_GROUPS[0] + ' ' +  str(entry)
+        elif ableson_pop:
             if i < 37:
                 t = PATIENT_GROUPS[0] + ' ' +  str(entry)
             else:
@@ -1429,7 +1448,7 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
 
     # Loop over the state dictionaries based on the number of iterations, from
     #  100 to MAX_ITR*100
-    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
         if virtual:
@@ -1446,6 +1465,15 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                 f'smoothing{LABEL_SMOOTHING}_'
                 f'dropout{DROPOUT}'
                 f'{"_byLab" if by_lab else ""}.txt'
+            )
+        elif ableson_pop and len(PATIENT_GROUPS) == 1:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
             )
         elif ableson_pop:
             state_file = (
@@ -1513,7 +1541,7 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                 y0 = pt[:,0,1:]
 
                 # Compute the forward direction of the NODE
-                pred_y = odeint(
+                pred_y = odeint_adjoint(
                     model, y0, dense_t_eval
                 ).squeeze(-1)
 
@@ -1617,7 +1645,7 @@ def prediction_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict):
 
     # Loop over the state dictionaries based on the number of iterations, from
     #  100 to MAX_ITR*100
-    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
         if toy_data:
@@ -1816,7 +1844,7 @@ def prediction_ann_testing_mechanistic(model: NeuralCDE, loader: DataLoader,
 
     # Loop over the state dictionaries based on the number of iterations, from
     #  100 to MAX_ITR*100
-    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
         if toy_data:
@@ -1825,7 +1853,7 @@ def prediction_ann_testing_mechanistic(model: NeuralCDE, loader: DataLoader,
                 f'{PATIENT_GROUPS[0]}_'
                 f'{PATIENT_GROUPS[1]+"_" if len(PATIENT_GROUPS) > 1 else ""}'
                 f'batchsize{BATCH_SIZE}_'
-                f'{itr}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
                 f'smoothing{LABEL_SMOOTHING}_'
                 f'dropout{DROPOUT}_{T_END}hrs'
                 f'{"_irregularSamples" if IRREGULAR_T_SAMPLES else ""}.txt'
@@ -1882,7 +1910,7 @@ def prediction_ann_testing_mechanistic(model: NeuralCDE, loader: DataLoader,
         #  state
         state_dict = torch.load(state_filepath, map_location=DEVICE)
         model.load_state_dict(state_dict)
-        domain = torch.linspace(0, T_END, 1000).view(-1,1)
+        domain = torch.linspace(0, T_END, N_LAYERS).view(-1,1)
 
         # Loop through the test patients
         for i, (data, labels) in enumerate(loader):
@@ -1897,6 +1925,196 @@ def prediction_ann_testing_mechanistic(model: NeuralCDE, loader: DataLoader,
                     patient_id = f'Control Patient {index[i]}'
                 else:
                     patient_id = f'MDD Patient {index[i]}'
+
+                # Graph the results
+                graph_results(pred_y, domain, pt, patient_id,
+                              itr, info)
+
+
+def prediction_rnn_testing_mechanistic(model: NeuralCDE, loader: DataLoader, info: dict):
+    """Run the testing procedure for the given model and DataLoader"""
+    ctrl_num = info.get('ctrl_num')
+    control_combination = info.get('control_combination')
+    mdd_num = info.get('mdd_num')
+    mdd_combination = info.get('mdd_combination')
+    by_lab = info.get('by_lab')
+    virtual = info.get('virtual', True)
+    ableson_pop = info.get('ableson_pop', False)
+    toy_data = info.get('toy_data', False)
+    t_steps = info.get('t_steps', 11)
+
+    # Initialize the parameters for the model)
+    if not toy_data:
+        param_init_tsst(model)
+    else:
+        param_init(model)
+
+    # Set up the index numbers to match the patient numbers of the test
+    #  patients (or just 1-5 for Control and the same for MDD if no test
+    #  combinations)
+    if control_combination:
+        index = control_combination+mdd_combination
+    elif ableson_pop:
+        index = [i for i in range(50)]
+    elif toy_data and len(PATIENT_GROUPS) == 1:
+        index = [i for i in range(1000)]
+    elif toy_data:
+        index = [i for i in range(2000)]
+    elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+        index = [INDIVIDUAL_NUMBER]
+    else:
+        index = [i for i in range(5)]
+        index = index+index
+
+    tmp_index = []
+    for i, entry in enumerate(index):
+        if ableson_pop:
+            if i < 37:
+                t = PATIENT_GROUPS[0] + ' ' +  str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif toy_data:
+            if i < 1000:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif control_combination:
+            if i < len(control_combination):
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            t = PATIENT_GROUPS[0] + ' ' + str(entry)
+        else:
+            if i < 5:
+                t = PATIENT_GROUPS[0] + ' ' + str(entry)
+            else:
+                t = PATIENT_GROUPS[1] + ' ' + str(entry)
+        tmp_index.append(t)
+    index = tuple(tmp_index)
+
+    # Set the directory name where the model state dictionaries are located
+    if not virtual and len(PATIENT_GROUPS) == 1:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{PATIENT_GROUPS[0] if not toy_data else "Toy Dataset"}/'
+        )
+    elif not virtual:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+        )
+    elif toy_data:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Toy Dataset/'
+        )
+    elif not POP_NUMBER:
+        directory = (
+            f'Network States ({"Full" if not CORT_ONLY else "CORT ONLY"} VPOP Training)/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'{"By Lab" if by_lab else "By Diagnosis"}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    else:
+        directory = (
+            f'Network States (VPOP Training)/'
+            f'Control vs {PATIENT_GROUPS[1]} Population {POP_NUMBER}/'
+        )
+
+    # Loop over the state dictionaries based on the number of iterations, from
+    #  100 to MAX_ITR*100
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
+    for itr in range(1,n_saves+1):
+        # Set the filename for the network state_dict
+        if toy_data:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}_'
+                f'{PATIENT_GROUPS[1]+"_" if len(PATIENT_GROUPS) > 1 else ""}'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}_{T_END}hrs'
+                f'{"_irregularSamples" if IRREGULAR_T_SAMPLES else ""}.txt'
+            )
+        elif virtual:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_{"mechanistic_" if MECHANISTIC else ""}'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination) if not POP_NUMBER else ""}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination) if not POP_NUMBER else ""}_'
+                f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}'
+                f'{"_byLab" if by_lab else ""}.txt'
+            )
+        elif ableson_pop:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{METHOD}{NOISE_MAGNITUDE}Virtual_'
+                f'{PATIENT_GROUPS[0]+str(control_combination)}_'
+                f'{PATIENT_GROUPS[1]+str(mdd_combination)}_'
+                f'{NUM_PER_PATIENT}perPatient_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        elif INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}_noParamGrads.txt'
+            )
+        else:
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'Control_vs_{PATIENT_GROUPS[1]}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+        state_filepath = os.path.join(directory, state_file)
+        # Check that the file exists
+        if not os.path.exists(state_filepath):
+            raise FileNotFoundError(f'Failed to load file: {state_filepath}')
+        # Load the state dictionary from the file and set the model to that
+        #  state
+        state_dict = torch.load(state_filepath, map_location=DEVICE)
+        model.load_state_dict(state_dict)
+
+        # Loop through the test patients
+        for (data, _) in loader:
+            for i, pt in enumerate(data):
+                if INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
+                    pt = pt.view(1,t_steps,-1)
+                domain = torch.linspace(0, T_END, SEQ_LENGTH).view(-1,1)
+                # Repeat for the dense predictions
+                pred_y = model(domain.view(-1,1))
+
+                if MECHANISTIC and not toy_data:
+                    state = model.state_dict()
+                    y0 = torch.cat((torch.tensor([0]), data[...,0,1:].squeeze(), torch.tensor([0])))
+                    true_mechanistic = func(state, y0)
+                    info.update({'true_mechanistic': true_mechanistic})
+
+                if i < len(index)/2:
+                    patient_id = f'{index[i]}'
+                else:
+                    patient_id = f'{index[i]}'
 
                 # Graph the results
                 graph_results(pred_y, domain, pt, patient_id,
@@ -1993,7 +2211,7 @@ def prediction_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
 
     # Loop over the state dictionaries based on the number of iterations, from
     #  100 to MAX_ITR*100
-    n_saves = int(np.floor(MAX_ITR/SAVE_FREQ))
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
     for itr in range(1,n_saves+1):
         # Set the filename for the network state_dict
         if virtual:
@@ -2098,11 +2316,11 @@ def prediction_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict):
 def param_init(model: nn.Module):
     """Initialize the parameters for the mechanistic loss, and set them to
     require gradient"""
-    k_stress = torch.nn.Parameter(torch.tensor(13.7), requires_grad=True)
-    Ki = torch.nn.Parameter(torch.tensor(1.6), requires_grad=True)
-    VS3 = torch.nn.Parameter(torch.tensor(3.25), requires_grad=True)
-    Km1 = torch.nn.Parameter(torch.tensor(1.74), requires_grad=True)
-    KP2 = torch.nn.Parameter(torch.tensor(8.3), requires_grad=True)
+    k_stress = torch.nn.Parameter(torch.tensor(13.7), requires_grad=False)
+    Ki = torch.nn.Parameter(torch.tensor(1.6), requires_grad=False)
+    VS3 = torch.nn.Parameter(torch.tensor(3.25), requires_grad=False)
+    Km1 = torch.nn.Parameter(torch.tensor(1.74), requires_grad=False)
+    KP2 = torch.nn.Parameter(torch.tensor(8.3), requires_grad=False)
     VS4 = torch.nn.Parameter(torch.tensor(0.907), requires_grad=False)
     Km2 = torch.nn.Parameter(torch.tensor(0.112), requires_grad=False)
     KP3 = torch.nn.Parameter(torch.tensor(0.945), requires_grad=False)
@@ -2111,13 +2329,15 @@ def param_init(model: nn.Module):
     Kd1 = torch.nn.Parameter(torch.tensor(0.00379), requires_grad=False)
     Kd2 = torch.nn.Parameter(torch.tensor(0.00916), requires_grad=False)
     Kd3 = torch.nn.Parameter(torch.tensor(0.356), requires_grad=False)
-    n1 = torch.nn.Parameter(torch.tensor(5.43), requires_grad=True)
-    n2 = torch.nn.Parameter(torch.tensor(5.1), requires_grad=True)
-    Kb = torch.nn.Parameter(torch.tensor(0.0202), requires_grad=True)
-    Gtot = torch.nn.Parameter(torch.tensor(3.28), requires_grad=True)
-    VS2 = torch.nn.Parameter(torch.tensor(0.0509), requires_grad=True)
-    K1 = torch.nn.Parameter(torch.tensor(0.645), requires_grad=True)
-    Kd5 = torch.nn.Parameter(torch.tensor(0.0854), requires_grad=True)
+    n1 = torch.nn.Parameter(torch.tensor(5.43), requires_grad=False)
+    n2 = torch.nn.Parameter(torch.tensor(5.1), requires_grad=False)
+    Kb = torch.nn.Parameter(torch.tensor(0.0202), requires_grad=False)
+    Gtot = torch.nn.Parameter(torch.tensor(3.28), requires_grad=False)
+    VS2 = torch.nn.Parameter(torch.tensor(0.0509), requires_grad=False)
+    K1 = torch.nn.Parameter(torch.tensor(0.645), requires_grad=False)
+    Kd5 = torch.nn.Parameter(torch.tensor(0.0854), requires_grad=False)
+    kdStress = torch.nn.Parameter(torch.tensor(0.19604, device=DEVICE), requires_grad=False)
+    stressStr = torch.nn.Parameter(torch.tensor(1., device=DEVICE), requires_grad=False)
 
     params = {
         'k_stress': k_stress,
@@ -2139,9 +2359,71 @@ def param_init(model: nn.Module):
         'Gtot': Gtot,
         'VS2': VS2,
         'K1': K1,
-        'Kd5': Kd5
+        'Kd5': Kd5,
+        'kdStress': kdStress,
+        'stressStr': stressStr,
     }
 
+    for key, val in params.items():
+        model.register_parameter(key, val)
+
+    return params
+
+
+def param_init_tsst(model: nn.Module):
+    """Initialize the parameters for the mechanistic loss, and set them to
+    require gradient"""
+    R0CRH = torch.nn.Parameter(torch.tensor(-0.52239, device=DEVICE), requires_grad=False)
+    RCRH_CRH = torch.nn.Parameter(torch.tensor(0.97555, device=DEVICE), requires_grad=False)
+    RGR_CRH = torch.nn.Parameter(torch.tensor(-2.0241, device=DEVICE), requires_grad=False)
+    RSS_CRH = torch.nn.Parameter(torch.tensor(9.8594, device=DEVICE), requires_grad=False)
+    sigma = torch.nn.Parameter(torch.tensor(4.974, device=DEVICE), requires_grad=False)
+    tsCRH = torch.nn.Parameter(torch.tensor(0.10008, device=DEVICE), requires_grad=False)
+    R0ACTH = torch.nn.Parameter(torch.tensor(-0.29065, device=DEVICE), requires_grad=False)
+    RCRH_ACTH = torch.nn.Parameter(torch.tensor(6.006, device=DEVICE), requires_grad=False)
+    RGR_ACTH = torch.nn.Parameter(torch.tensor(-10.004, device=DEVICE), requires_grad=False)
+    tsACTH = torch.nn.Parameter(torch.tensor(0.046655, device=DEVICE), requires_grad=False)
+    R0CORT = torch.nn.Parameter(torch.tensor(-0.95265, device=DEVICE), requires_grad=False)
+    RACTH_CORT = torch.nn.Parameter(torch.tensor(0.022487, device=DEVICE), requires_grad=False)
+    tsCORT = torch.nn.Parameter(torch.tensor(0.048451, device=DEVICE), requires_grad=False)
+    R0GR = torch.nn.Parameter(torch.tensor(-0.49428, device=DEVICE), requires_grad=False)
+    RCORT_GR = torch.nn.Parameter(torch.tensor(0.02745, device=DEVICE), requires_grad=False)
+    RGR_GR = torch.nn.Parameter(torch.tensor(0.10572, device=DEVICE), requires_grad=False)
+    kdStress = torch.nn.Parameter(torch.tensor(0.19604, device=DEVICE), requires_grad=False)
+    MaxCRH = torch.nn.Parameter(torch.tensor(1.0011, device=DEVICE), requires_grad=False)
+    MaxACTH = torch.nn.Parameter(torch.tensor(140.2386, device=DEVICE), requires_grad=False)
+    MaxCORT = torch.nn.Parameter(torch.tensor(30.3072, device=DEVICE), requires_grad=False)
+    BasalACTH = torch.nn.Parameter(torch.tensor(0.84733, device=DEVICE), requires_grad=False)
+    BasalCORT = torch.nn.Parameter(torch.tensor(0.29757, device=DEVICE), requires_grad=False)
+    ksGR = torch.nn.Parameter(torch.tensor(0.40732, device=DEVICE), requires_grad=False)
+    kdGR = torch.nn.Parameter(torch.tensor(0.39307, device=DEVICE), requires_grad=False)
+
+    params = {
+        'R0CRH': R0CRH,
+        'RCRH_CRH': RCRH_CRH,
+        'RGR_CRH': RGR_CRH,
+        'RSS_CRH': RSS_CRH,
+        'sigma': sigma,
+        'tsCRH': tsCRH,
+        'R0ACTH': R0ACTH,
+        'RCRH_ACTH': RCRH_ACTH,
+        'RGR_ACTH': RGR_ACTH,
+        'tsACTH': tsACTH,
+        'R0CORT': R0CORT,
+        'RACTH_CORT': RACTH_CORT,
+        'tsCORT': tsCORT,
+        'R0GR': R0GR,
+        'RCORT_GR': RCORT_GR,
+        'RGR_GR': RGR_GR,
+        'kdStress': kdStress,
+        'MaxCRH': MaxCRH,
+        'MaxACTH': MaxACTH,
+        'MaxCORT': MaxCORT,
+        'BasalACTH': BasalACTH,
+        'BasalCORT': BasalCORT,
+        'ksGR': ksGR,
+        'kdGR': kdGR,
+    }
     for key, val in params.items():
         model.register_parameter(key, val)
 
@@ -2215,7 +2497,7 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
         f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
         f'{NUM_PER_PATIENT}perPatient_'
         f'batchsize{BATCH_SIZE}_'
-        f'{MAX_ITR}maxITER_{NORMALIZE_STANDARDIZE}_'
+        f'{ITERS}maxITER_{NORMALIZE_STANDARDIZE}_'
         f'smoothing{LABEL_SMOOTHING}_'
         f'dropout{DROPOUT}'
         f'{"_byLab" if by_lab else ""}.xlsx'
@@ -2223,7 +2505,7 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
         f'{NETWORK_TYPE}_{HDIM}nodes_'
         f'Control_vs_{PATIENT_GROUPS[1]}_'
         f'batchsize{BATCH_SIZE}_'
-        f'{MAX_ITR}maxITER_{NORMALIZE_STANDARDIZE}_'
+        f'{ITERS}maxITER_{NORMALIZE_STANDARDIZE}_'
         f'smoothing{LABEL_SMOOTHING}_'
         f'dropout{DROPOUT}.xlsx'
     )
@@ -2232,7 +2514,7 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
         performance_df.to_excel(writer)
 
 
-def graph_results(pred_y: torch.Tensor, pred_t: torch.Tensor,
+def graph_results(pred_y: torch.Tensor | tuple, pred_t: torch.Tensor,
                   data: torch.Tensor, patient_id: str,
                   save_num: int, info: dict):
     # Access the necessary variables from the info dictionary
@@ -2243,6 +2525,7 @@ def graph_results(pred_y: torch.Tensor, pred_t: torch.Tensor,
     mdd_combination = info.get('mdd_combination')
     by_lab = info.get('by_lab')
     toy_data = info.get('toy_data', False)
+    true_mechanistic = info.get('true_mechanistic', torch.zeros_like(pred_y))
 
     # Convert the save number to the number of iterations
     itr = save_num*SAVE_FREQ
@@ -2306,7 +2589,7 @@ def graph_results(pred_y: torch.Tensor, pred_t: torch.Tensor,
             f'{NETWORK_TYPE}_{HDIM}nodes_'
             f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
             f'batchsize{BATCH_SIZE}_'
-            f'{MAX_ITR}maxITER_{NORMALIZE_STANDARDIZE}_'
+            f'{ITERS}maxITER_{NORMALIZE_STANDARDIZE}_'
             f'smoothing{LABEL_SMOOTHING}_'
             f'dropout{DROPOUT}_'
         )
@@ -2315,7 +2598,7 @@ def graph_results(pred_y: torch.Tensor, pred_t: torch.Tensor,
             f'{NETWORK_TYPE}_{HDIM}nodes_'
             f'Control_vs_{PATIENT_GROUPS[1]}_'
             f'batchsize{BATCH_SIZE}_'
-            f'{MAX_ITR}maxITER_{NORMALIZE_STANDARDIZE}_'
+            f'{ITERS}maxITER_{NORMALIZE_STANDARDIZE}_'
             f'smoothing{LABEL_SMOOTHING}_'
             f'dropout{DROPOUT}_'
         )
@@ -2328,25 +2611,169 @@ def graph_results(pred_y: torch.Tensor, pred_t: torch.Tensor,
             f'{"Control vs "+PATIENT_GROUPS[1]+" Population"+str(POP_NUMBER) if POP_NUMBER else ""}'
             f'{NUM_PER_PATIENT}perPatient_'
             f'batchsize{BATCH_SIZE}_'
-            f'{MAX_ITR}maxITER_{NORMALIZE_STANDARDIZE}_'
+            f'{ITERS}maxITER_{NORMALIZE_STANDARDIZE}_'
             f'smoothing{LABEL_SMOOTHING}_'
             f'dropout{DROPOUT}_'
             f'{"_byLab" if by_lab else ""}_'
         )
 
+    # if NETWORK_TYPE == 'RNN' and MECHANISTIC:
+        # (pred_crh, pred_acth, pred_cort, pred_gr) = pred_y
+        # pred_y = torch.cat([pred_crh, pred_acth, pred_cort, pred_gr], dim=1)
     # pred_y = pred_y.view(data.size(1), data.size(2)-1)
+    # else:
     pred_y = pred_y.squeeze()
-    fig, axes = plt.subplots(nrows=OUTPUT_CHANNELS, figsize=(10,10))
-    for idx,ax in enumerate(range(OUTPUT_CHANNELS)):
-        axes[ax].plot(data[...,0].squeeze(), data[...,idx+1].squeeze(), 'o', label=patient_id)
+    nrows = 2 if not MECHANISTIC else 4
+    data_ind = [0,1] if not MECHANISTIC else [1,2]
+    fig, axes = plt.subplots(nrows=nrows, figsize=(10,10))
+    for ax in range(nrows):
+        if ax in data_ind:
+            axes[ax].plot(data[...,0].squeeze(), data[...,ax+1 if not MECHANISTIC else ax].squeeze(), 'o', label=patient_id)
         axes[ax].plot(
-            pred_t, pred_y[:,idx], label=f'Predicted y ({itr} iterations)'
+            pred_t, pred_y[:,ax], color='orange', label=f'Predicted y ({itr} iterations)'
         )
+        if MECHANISTIC:
+            axes[ax].plot(
+                true_mechanistic[...,0], true_mechanistic[...,ax+1], color='green', label=f'True Mechanistic Solution'
+            )
         axes[ax].set(title=patient_id, xlabel='Time (normalized)', ylabel='Concentration')
         axes[ax].legend(fancybox=True, shadow=True, loc='upper right')
 
-    plt.savefig(os.path.join(directory, filename+patient_id+'.png'), dpi=300)
+    plt.savefig(os.path.join(directory, filename+patient_id+f'_{itr}iterations.png'), dpi=300)
     plt.close(fig)
+
+
+def func(params, y0):
+    """This function solves the system to find the true mechanistic component
+    for graphing."""
+    def stress(t):
+        if t < 30:
+            return 0
+        return torch.exp(-params['kdStress']*(t-30))
+
+    def ode_rhs(y, t):
+        y = torch.from_numpy(y).view(-1)
+        dy = torch.zeros(4)
+
+        # Apologies for the mess here, but typing out ODEs in Python is a bit of a
+        #  chore
+        # wCRH = params['R0CRH'] + params['RCRH_CRH']*y[...,0] \
+        #     + params['RSS_CRH']*stress(t) + params['RGR_CRH']*y[...,3]
+        # FCRH = (params['MaxCRH']*params['tsCRH'])/(1 + torch.exp(-params['sigma']*wCRH))
+        # dy[0] = FCRH - params['tsCRH']*y[...,0]
+
+        # wACTH = params['R0ACTH'] + params['RCRH_ACTH']*y[...,0] \
+        #     + params['RGR_ACTH']*y[...,3]
+        # FACTH = (params['MaxACTH']*params['tsACTH'])/(1 + torch.exp(-params['sigma']*wACTH)) + params['BasalACTH']
+        # dy[1] = FACTH - params['tsACTH']*y[...,1]
+
+        # wCORT = params['R0CORT'] + params['RACTH_CORT']*y[...,1]
+        # FCORT = (params['MaxCORT']*params['tsCORT'])/(1 + torch.exp(-params['sigma']*wCORT)) + params['BasalCORT']
+        # dy[2] = FCORT - params['tsCORT']*y[...,2]
+
+        # wGR = params['R0GR'] + params['RCORT_GR']*y[...,2] + params['RGR_GR']*y[...,3]
+        # FGR = params['ksGR']/(1 + torch.exp(-params['sigma']*wGR))
+        # dy[3] = FGR - params['kdGR']*y[...,3]
+        # return dy
+
+        wCRH = params['R0CRH'] + params['RCRH_CRH']*y[...,0] \
+            + params['RSS_CRH']*stress(t) + params['RGR_CRH']*y[...,3]
+        FCRH = (params['MaxCRH']*params['tsCRH'])/(1 + torch.exp(-params['sigma']*wCRH))
+        dy[0] = FCRH - params['tsCRH']*y[...,0]
+
+        wACTH = params['R0ACTH'] + params['RCRH_ACTH']*y[...,0] \
+            + params['RGR_ACTH']*y[...,3]
+        FACTH = (params['MaxACTH']*params['tsACTH'])/(1 + torch.exp(-params['sigma']*wACTH)) + params['BasalACTH']
+        dy[1] = FACTH - params['tsACTH']*y[...,1]
+
+        wCORT = params['R0CORT'] + params['RACTH_CORT']*y[...,1]
+        FCORT = (params['MaxCORT']*params['tsCORT'])/(1 + torch.exp(-params['sigma']*wCORT)) + params['BasalCORT']
+        dy[2] = FCORT - params['tsCORT']*y[...,2]
+
+        wGR = params['R0GR'] + params['RCORT_GR']*y[...,2] + params['RGR_GR']*y[...,3]
+        FGR = params['ksGR']/(1 + torch.exp(-params['sigma']*wGR))
+        dy[3] = FGR - params['kdGR']*y[...,3]
+        return dy
+
+    t_eval = torch.linspace(0,140,11)
+    gflow = odeint(ode_rhs, y0, t_eval)
+    gflow = torch.from_numpy(gflow)
+    gflow = torch.cat((t_eval.view(-1,1), gflow), dim=1)
+    return gflow
+
+
+def sriram_func(params, y0):
+    def stress(t):
+        if t < 30:
+            return 0
+        return torch.exp(-params['kdStress']*(t-30))
+    def ode_rhs(y, t):
+        dy = np.zeros(4)
+        dy[0] = stress(t)*(params['Ki']**params['n2']/(params['Ki']**params['n2'] + y[3]**params['n2'])) \
+            - params['VS3']*(y[0]/(params['Km1'] + y[0])) - params['Kd1']*y[0]
+        dy[1] = params['KP2']*y[0]*(params['Ki']**params['n2']/(params['Ki']**params['n2'] + y[3]**params['n2'])) \
+            - params['VS4']*(y[1]/(params['Km2'] + y[1])) - params['Kd2']*y[1]
+        dy[2] = params['KP3']*y[1] - params['VS5']*(y[2]/(params['Km3'] + y[2])) - params['Kd3']*y[2]
+        dy[3] = params['Kb']*y[2]*(params['Gtot'] - y[3]) \
+            + params['VS2']*(y[3]**params['n1']/(params['K1']**params['n1'] \
+            + y[3]**params['n1'])) - params['Kd5']*y[3]
+        return dy
+    t_eval = torch.linspace(0,2.35,20)
+    gflow = odeint(ode_rhs, y0, t_eval)
+    gflow = torch.from_numpy(gflow)
+    gflow = torch.cat((t_eval.view(-1,1), gflow), dim=1)
+    # aug_gflow = torch.zeros(0,20,5)
+    # for _ in range(1000):
+    #     time_pt_sample = torch.sort(torch.randperm(2000)[:20], dim=0)[0]
+    #     tmp = torch.cat((t_eval[time_pt_sample].view(20,1), gflow[time_pt_sample,...]), 1)
+    #     aug_gflow = torch.cat((aug_gflow.view(-1,20,5), tmp.view(1,20,5)), dim=0)
+
+    # return aug_gflow
+    return gflow
+
+if __name__ == '__main__':
+    # Set the directory name where the model state dictionaries are located
+    directory = (
+        f'Network States/'
+        f'{"Classification" if CLASSIFY else "Prediction"}/'
+        f'{PATIENT_GROUPS[0]}/'
+    )
+    # Loop over the state dictionaries based on the number of iterations, from
+    #  100 to MAX_ITR*100
+    n_saves = int(np.floor(ITERS/SAVE_FREQ))
+
+    loader, _ = load_data(virtual=False, patient_groups=PATIENT_GROUPS)
+
+    for data, labels in loader:
+        for itr in range(1,n_saves+1):
+            # Set the filename for the network state_dict
+            state_file = (
+                f'NN_state_{HDIM}nodes_{NETWORK_TYPE}_'
+                f'{PATIENT_GROUPS[0]}{INDIVIDUAL_NUMBER}_'
+                f'batchsize{BATCH_SIZE}_'
+                f'{itr*SAVE_FREQ}ITER_{NORMALIZE_STANDARDIZE}_'
+                f'smoothing{LABEL_SMOOTHING}_'
+                f'dropout{DROPOUT}.txt'
+            )
+            state_filepath = os.path.join(directory, state_file)
+            print(f"{state_filepath=}")
+            # Check that the file exists
+            if not os.path.exists(state_filepath):
+                raise FileNotFoundError(f'Failed to load file: {state_filepath}')
+            # Load the state dictionary from the file and set the model to that
+            #  state
+            state_dict = torch.load(state_filepath, map_location=DEVICE)
+            model = model_init({})
+            param_init_tsst(model)
+            model.load_state_dict(state_dict)
+            with torch.no_grad():
+                y0 = model(torch.zeros((1,1))).squeeze()
+            gflow = func(state_dict, y0)
+            fig, axes = plt.subplots(nrows=4, figsize=(10,10))
+            for ax in range(4):
+                axes[ax].plot(gflow[:,0], gflow[:,ax+1], label=f'Variable {ax+1}')
+
+            plt.show()
 
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#

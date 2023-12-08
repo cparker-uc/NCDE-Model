@@ -1,7 +1,7 @@
 # File Name: ann.py
 # Author: Christopher Parker
 # Created: Tue Aug 22, 2023 | 10:07P EDT
-# Last Modified: Mon Sep 18, 2023 | 02:44P EDT
+# Last Modified: Tue Sep 19, 2023 | 02:26P EDT
 
 """Contains the class for using ANN instead of NODE/NCDE"""
 
@@ -17,23 +17,23 @@ class ANN(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(input_channels, hdim),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hdim, hdim),
             nn.Dropout(dropout),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hdim, hdim),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hdim, hdim),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hdim, hdim),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hdim, output_channels),
         ).to(device)
 
         for m in self.net.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_normal_(m.weight)
-                nn.init.constant_(m.bias, 0)
+                nn.init.normal_(m.bias, 0, np.sqrt(6/(hdim*2)))
 
     def forward(self, y):
         return self.net(y)

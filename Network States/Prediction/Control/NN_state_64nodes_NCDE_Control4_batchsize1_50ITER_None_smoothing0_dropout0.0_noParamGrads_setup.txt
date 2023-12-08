@@ -1,0 +1,40 @@
+Model Setup for {PATIENT_GROUPS} #{INDIVIDUAL_NUMBER} Trained Network:
+
+NCDE Network Architecture Parameters
+Input channels=3
+Hidden channels=64
+Output channels=3
+
+Training hyperparameters
+Optimizer=AdamW (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.001
+    maximize: False
+    weight_decay: 0.0
+)
+Training Iterations=50
+Learning rate=0.001
+Weight decay=0.0
+Optimizer reset frequency=None
+
+Dropout probability (after initial linear layer before NCDE): 0.0
+Training Data Selection Parameters
+(If not virtual, the only important params are the groups and whether data was normalized/standardized)
+Patient groups=['Control']
+Augmentation strategy=None
+Noise Magnitude=0.0
+Normalized/standardized=None
+Number of virtual patients per real patient=0
+Label smoothing factor=0
+Test Patient Combinations:
+Training batch size=1
+Training Results:
+Runtime=75.82521295547485
+Loss over time=[(0, 27.841475992937955), (0, 54.79602408806943), (0, 66.14383429901896), (0, 44.66768838223913), (0, 25.235010715183574), (0, 17.33765878759021), (0, 11.0905644744276), (0, 9.775869458444829), (0, 14.546916075055622), (0, 12.703343855115067), (0, 13.239585415093684), (0, 13.69909132924535), (0, 12.760551830598297), (0, 11.006734728663915), (0, 9.027468747266713), (0, 7.454420099646236), (0, 5.722483009716721), (0, 4.388209166099158), (0, 4.8683067997181295), (0, 4.129717839385214), (0, 5.674185606806446), (0, 6.038324923146128), (0, 6.3157231658572295), (0, 6.009955384282265), (0, 5.201369816546319), (0, 4.178583502176191), (0, 3.3770621515239845), (0, 3.8958282554986003), (0, 3.7206475724296317), (0, 3.0308514671867184), (0, 3.7473188409630502), (0, 4.20076303550091), (0, 3.9658255268589087), (0, 3.4879923415685106), (0, 3.7200944052320324), (0, 3.948413244791309), (0, 4.549189788870958), (0, 4.344194125330606), (0, 4.417899601214416), (0, 4.372848538951238), (0, 4.268283391328435), (0, 4.934230916264251), (0, 4.3466370052465075), (0, 4.241319654288169), (0, 4.304584368633378), (0, 4.413546013180961), (0, 4.706077596706671), (0, 4.612666631562497), (0, 4.3735634475737735), (0, 4.297896196435845)]

@@ -1,7 +1,7 @@
 # File Name: neural_ode.py
 # Author: Christopher Parker
 # Created: Mon Aug 14, 2023 | 11:02P EDT
-# Last Modified: Thu Sep 14, 2023 | 08:13P EDT
+# Last Modified: Wed Sep 27, 2023 | 05:23P EDT
 
 """Contains the class for running NODE training"""
 
@@ -16,22 +16,19 @@ class NeuralODE(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(input_channels, hdim),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(hdim, hdim),
-            nn.Tanh(),
-            nn.Linear(hdim, hdim),
-            nn.Tanh(),
-            nn.Linear(hdim, hdim),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(hdim, output_channels),
-            nn.Tanh(),
+            nn.ReLU(),
         ).to(device)
 
         for m in self.net.modules():
             if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
+                nn.init.normal_(m.weight, mean=0, std=0.1)
+                nn.init.normal_(m.bias, mean=0, std=0.5)
                 # nn.init.normal_(m.weight, mean=0., std=np.sqrt(2/(hdim*2)))
-                nn.init.constant_(m.bias, 0)
+                # nn.init.constant_(m.bias, 0)
 
     def forward(self, t, y):
         """t is unnecessary, but still passed by the NODE solver"""

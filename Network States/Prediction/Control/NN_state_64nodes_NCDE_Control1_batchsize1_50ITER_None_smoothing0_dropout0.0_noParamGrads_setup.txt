@@ -1,0 +1,40 @@
+Model Setup for {PATIENT_GROUPS} #{INDIVIDUAL_NUMBER} Trained Network:
+
+NCDE Network Architecture Parameters
+Input channels=5
+Hidden channels=64
+Output channels=5
+
+Training hyperparameters
+Optimizer=AdamW (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.001
+    maximize: False
+    weight_decay: 0.0
+)
+Training Iterations=50
+Learning rate=0.001
+Weight decay=0.0
+Optimizer reset frequency=None
+
+Dropout probability (after initial linear layer before NCDE): 0.0
+Training Data Selection Parameters
+(If not virtual, the only important params are the groups and whether data was normalized/standardized)
+Patient groups=['Control']
+Augmentation strategy=None
+Noise Magnitude=0.0
+Normalized/standardized=None
+Number of virtual patients per real patient=0
+Label smoothing factor=0
+Test Patient Combinations:
+Training batch size=1
+Training Results:
+Runtime=94.22633123397827
+Loss over time=[(0, 40.75414276123047), (0, 61.644508361816406), (0, 69.7936782836914), (0, 72.28105163574219), (0, 76.19570922851562), (0, 82.35945129394531), (0, 86.71546936035156), (0, 88.65245819091797), (0, 89.21128845214844), (0, 88.31228637695312), (0, 86.3360595703125), (0, 83.52169799804688), (0, 82.7624740600586), (0, 82.42996215820312), (0, 82.26641845703125), (0, 81.67672729492188), (0, 82.97561645507812), (0, 83.8391342163086), (0, 84.40034484863281), (0, 84.58582305908203), (0, 84.74242401123047), (0, 84.81272888183594), (0, 85.15636444091797), (0, 85.1430892944336), (0, 85.64692687988281), (0, 86.33439636230469), (0, 86.75171661376953), (0, 86.4801025390625), (0, 86.18856048583984), (0, 86.45409393310547), (0, 86.73783111572266), (0, 86.8362808227539), (0, 87.27494812011719), (0, 88.0350341796875), (0, 88.3782730102539), (0, 88.44537353515625), (0, 88.17444610595703), (0, 88.51495361328125), (0, 89.40477752685547), (0, 89.86402130126953), (0, 89.84358978271484), (0, 88.83272552490234), (0, 89.15350341796875), (0, 89.30598449707031), (0, 89.6977767944336), (0, 89.8600082397461), (0, 90.01600646972656), (0, 90.21104431152344), (0, 89.66133117675781), (0, 89.20732116699219)]

@@ -1,0 +1,41 @@
+Model Setup for {PATIENT_GROUPS} Trained Network:
+
+RNN Network Architecture Parameters
+Input channels=1
+Hidden channels=32
+Output channels=1
+
+Training hyperparameters
+Optimizer=AdamW (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.001
+    maximize: False
+    weight_decay: 0.0
+)Training Iterations=10
+Learning rate=0.001
+Weight decay=0.0
+Optimizer reset frequency=1000
+
+Dropout probability (after initial linear layer before NCDE): 0.0
+Training Data Selection Parameters
+(If not virtual, the only important params are the groups and whether data was normalized/standardized)
+Patient groups=['Control']
+Augmentation strategy=Uniform
+Noise Magnitude=0.0
+Normalized/standardized=None
+Number of virtual patients per real patient=100
+Label smoothing factor=0
+Test Patient Combinations:
+Control: None
+MDD: None
+Training batch size=1
+Training Results:
+Runtime=69.52031207084656
+Loss over time=[(0, 15.267751461826158), (0, 14.656822782556219), (0, 14.200508057361304), (0, 13.82633728992964), (0, 13.481624797400267), (0, 13.099134542831179), (0, 12.618870214128329), (0, 11.992355981955484), (0, 11.17831722431936), (0, 10.158663041586413)]

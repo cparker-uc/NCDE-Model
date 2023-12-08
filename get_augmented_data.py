@@ -1,7 +1,7 @@
 # File Name: get_augmented_data.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 03:19P EDT
-# Last Modified: Wed Sep 13, 2023 | 08:31P EDT
+# Last Modified: Fri Nov 24, 2023 | 09:53P EST
 
 """Loads the datasets that have been augmented with noise to create virtual
 patients"""
@@ -33,6 +33,9 @@ class BaseVirtualPopulation(Dataset):
         # Number of patients used for creating virtual patients
         self.num_patients = (0,)
         self.normalize_standardize = normalize_standardize
+
+        # Whether we trim the last 3 time points from the Nelson data to make
+        #  it conform to the Ableson data
 
         # self.X contains 11 time points with 3 input channels
         #  (time, ACTH, CORT) for each time
@@ -192,7 +195,7 @@ class FullVirtualPopulation(BaseVirtualPopulation):
         super().__init__(
             method, normalize_standardize, num_per_patient,
             control_combination, mdd_combination, test, label_smoothing,
-            noise_magnitude
+            noise_magnitude,
         )
         # Length and label for each patient group in the dataset
         self.group_info = {

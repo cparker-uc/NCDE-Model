@@ -1,7 +1,7 @@
 # File Name: neural_cde.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 12:43P EDT
-# Last Modified: Wed Sep 13, 2023 | 03:17P EDT
+# Last Modified: Fri Nov 24, 2023 | 09:36P EST
 
 """Classes for implementation of Neural CDE networks"""
 
@@ -9,6 +9,86 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torchcde
+
+class DEControl(nn.Module):
+    """Passed to the cdeint function as the control, contains the mechanistic
+    solution to the equation"""
+
+    def __init__(self, sol, params, t=None, device=torch.device('cpu'), **kwargs):
+        """
+        """
+        super().__init__()
+
+        if t is None:
+            t = torch.linspace(0, 140, 1)
+
+        self.register_buffer('_t', t)
+        self.register_buffer('_sol', sol)
+        self.device = device
+
+        for key, val in params.items():
+            self.register_buffer(key, val)
+
+    @property
+    def grid_points(self):
+        return self._t
+
+    @property
+    def interval(self):
+        return torch.stack([self._t[0], self._t[-1]])
+
+    def _interpret_t(self, t):
+        t = torch.as_tensor(t, dtype=torch.float32, device=self.device)
+        maxlen = self._b.size(-2) - 1
+        # clamp because t may go outside of [t[0], t[-1]]; this is fine
+        index = torch.bucketize(t.detach(), self._t.detach()).sub(1).clamp(0, maxlen)
+        # will never access the last element of self._t; this is correct behaviour
+        fractional_part = t - self._t[index]
+        return fractional_part, index
+
+    def evaluate(self, t):
+        """Return the nearest time point from the solution curve"""
+        def find_nearest(array, value):
+            idx = (torch.abs(array-value)).argmin()
+            return idx
+
+        sol_pt = self._sol[[find_nearest(t, u) for u in self._sol[...,0].squeeze()],...]
+        return sol_pt
+
+    def derivative(self, t):
+        sol_pt = self.evaluate(t)
+        dy = self.ode_rhs(sol_pt, t)
+        return dy
+
+    def stress(self, t):
+        if t < 30:
+            return 0
+        return torch.exp(-self.kdStress*(t-30))
+
+    def ode_rhs(self, y, t):
+        dy = torch.zeros_like(y, requires_grad=False)
+
+        # Apologies for the mess here, but typing out ODEs in Python is a bit of a
+        #  chore
+        wCRH = self.R0CRH + self.RCRH_CRH*y[...,0] \
+            + self.RSS_CRH*self.stress(t.detach()) + self.RGR_CRH*y[...,3]
+        FCRH = (self.MaxCRH*self.tsCRH)/(1 + torch.exp(-self.sigma*wCRH))
+        dy[...,0] = FCRH - self.tsCRH*y[...,0]
+
+        wACTH = self.R0ACTH + self.RCRH_ACTH*y[...,0] \
+            + self.RGR_ACTH*y[...,3]
+        FACTH = (self.MaxACTH*self.tsACTH)/(1 + torch.exp(-self.sigma*wACTH)) + self.BasalACTH
+        dy[...,1] = FACTH - self.tsACTH*y[...,1]
+
+        wCORT = self.R0CORT + self.RACTH_CORT*y[...,1]
+        FCORT = (self.MaxCORT*self.tsCORT)/(1 + torch.exp(-self.sigma*wCORT)) + self.BasalCORT
+        dy[...,2] = FCORT - self.tsCORT*y[...,2]
+
+        wGR = self.R0GR + self.RCORT_GR*y[...,2] + self.RGR_GR*y[...,3]
+        FGR = self.ksGR/(1 + torch.exp(self.sigma*wGR))
+        dy[...,3] = FGR - self.kdGR*y[...,3]
+        return dy
+
 
 class CDEFunc(torch.nn.Module):
     """CDEs are defined as: z_t = z_0 + \\int_{0}^t f_{theta}(z_s) dX_s, where
@@ -49,10 +129,10 @@ class NeuralCDE(torch.nn.Module):
     so that when we call the instance of NeuralCDE it solves the system"""
     def __init__(self, input_channels: int, hidden_channels: int,
                  output_channels: int,
-                 t_interval: torch.Tensor=torch.tensor((0,1), dtype=float),
+                 t_interval: torch.Tensor=torch.tensor((0,1), dtype=torch.float32),
                  device: torch.device=torch.device('cpu'),
                  interpolation: str='cubic', dropout: float=0.,
-                 prediction: bool=False):
+                 prediction: bool=False, dense_domain: torch.Tensor=torch.linspace(0,140,50)):
         super().__init__()
 
         self.func = CDEFunc(input_channels, hidden_channels, device)
@@ -75,7 +155,11 @@ class NeuralCDE(torch.nn.Module):
         if self.prediction:
             self.t_interval = t_interval.to(device)
         else:
-            self.t_interval = torch.tensor((0,1), dtype=float)
+            self.t_interval = torch.tensor((0,1), dtype=torch.float32)
+        self.dense_domain = dense_domain
+
+        self.hidden_channels = hidden_channels
+        self.input_channels = input_channels
 
     def forward(self, coeffs):
         """coeffs is the coefficients that describe the spline between the
@@ -86,6 +170,8 @@ class NeuralCDE(torch.nn.Module):
             X = torchcde.CubicSpline(coeffs, t=self.t_interval)
         elif self.interpolation == 'linear':
             X = torchcde.LinearInterpolation(coeffs)
+        elif self.interpolation == 'mechanistic':
+            X = coeffs # Probably should change the name of the input
         else:
             raise ValueError(
                 "Only cubic and linear interpolation are implemented"
@@ -102,7 +188,7 @@ class NeuralCDE(torch.nn.Module):
             X=X,
             z0=z0,
             func=self.func,
-            t=self.t_interval
+            t=self.dense_domain
         )
         # cdeint returns the initial value and terminal value from the
         #  integration, we only need the terminal

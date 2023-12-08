@@ -1,25 +1,39 @@
 # File Name: rnn.py
 # Author: Christopher Parker
 # Created: Tue Aug 22, 2023 | 02:37P EDT
-# Last Modified: Tue Aug 22, 2023 | 03:00P EDT
+# Last Modified: Fri Sep 29, 2023 | 01:14P EDT
 
 """Contains the class for using ANN instead of NODE/NCDE"""
 
 import torch
 import torch.nn as nn
+import numpy as np
 
 
 class RNN(nn.Module):
-    def __init__(self, input_channels, hdim, n_recur,
+    def __init__(self, input_channels, hdim, output_channels, n_layers,
                  device=torch.device('cpu')):
         super().__init__()
 
         self.net = nn.RNN(
-            input_channels, hdim, n_recur,
+            input_channels, hdim, n_layers,
         ).to(device)
+
+        # for name, param in self.net.named_parameters():
+        #     # We want to initialize the biases as 0
+        #     if name[:4].lower() == 'bias':
+        #         nn.init.constant_(param, 0)
+        #         continue
+        #     # And the weights with Xavier normal
+        #     nn.init.xavier_normal_(param, gain=nn.init.calculate_gain('tanh'))
+
+        self.readout = nn.Linear(hdim, output_channels)
 
     def forward(self, y):
         (y, _) = self.net(y)
+        y = self.readout(y)
+        y[...,[1,2]] = y[...,[1,2]].relu()
+        y[...,[0,3]] = y[...,[0,3]].tanh()
         return y
 
 

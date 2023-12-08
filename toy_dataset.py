@@ -1,7 +1,7 @@
 # File Name: toy_dataset.py
 # Author: Christopher Parker
 # Created: Tue Aug 01, 2023 | 10:09P EDT
-# Last Modified: Fri Sep 15, 2023 | 03:34P EDT
+# Last Modified: Wed Sep 20, 2023 | 01:34P EDT
 
 """Creates a toy dataset for use in validation of the NCDE architecture.
 Apologies for the haphazard nature of the code, it was done quickly and
@@ -27,16 +27,18 @@ def func(params, y0):
         dy[3] = K_b*y[2]*(G_tot - y[3]) + V_S2*(y[3]**n1/(K1**n1 + y[3]**n1)) \
             - K_d5*y[3]
         return dy
-    t_eval = torch.linspace(0,24,2000)
+    t_eval = torch.linspace(0,24,20)
     gflow = odeint(ode_rhs, y0, t_eval)
     gflow = torch.from_numpy(gflow)
-    aug_gflow = torch.zeros(0,20,5)
-    for _ in range(1000):
-        time_pt_sample = torch.sort(torch.randperm(2000)[:20], dim=0)[0]
-        tmp = torch.cat((t_eval[time_pt_sample].view(20,1), gflow[time_pt_sample,...]), 1)
-        aug_gflow = torch.cat((aug_gflow.view(-1,20,5), tmp.view(1,20,5)), dim=0)
+    gflow = torch.cat((t_eval.view(-1,1), gflow), dim=1)
+    # aug_gflow = torch.zeros(0,20,5)
+    # for _ in range(1000):
+    #     time_pt_sample = torch.sort(torch.randperm(2000)[:20], dim=0)[0]
+    #     tmp = torch.cat((t_eval[time_pt_sample].view(20,1), gflow[time_pt_sample,...]), 1)
+    #     aug_gflow = torch.cat((aug_gflow.view(-1,20,5), tmp.view(1,20,5)), dim=0)
 
-    return aug_gflow
+    # return aug_gflow
+    return gflow
 
 def generate_dataset():
     """Use a system of ordinary diff eqs to generate time-series data"""
@@ -57,8 +59,8 @@ def generate_dataset():
     # mdd_vpop = augment_gflow(mdd_gflow, 1000, 'Uniform', noise)
     # torch.save(ctrl_vpop, f'Virtual Populations/Toy_Control_Uniform{noise}_None_1000_{t_end}hr_test.txt')
     # torch.save(mdd_vpop, f'Virtual Populations/Toy_Atypical_Uniform{noise}_None_1000_{t_end}hr_test.txt')
-    torch.save(ctrl_gflow, f'Virtual Populations/Toy_Control_NoNoise_None_1000_{t_end}hr_irregularSamples_test.txt')
-    torch.save(mdd_gflow, f'Virtual Populations/Toy_Atypical_NoNoise_None_1000_{t_end}hr_irregularSamples_test.txt')
+    torch.save(ctrl_gflow, f'Virtual Populations/Toy_Control_NoNoise_None_1_{t_end}hr_test.txt')
+    torch.save(mdd_gflow, f'Virtual Populations/Toy_Atypical_NoNoise_None_1_{t_end}hr_test.txt')
 
 
 def uniform_noise(input_tensor, noise_magnitude):
@@ -424,9 +426,9 @@ def standardize_data():
 
 
 def main():
-    # generate_dataset()
+    generate_dataset()
     # check_pop_stats()
-    standardize_data()
+    # standardize_data()
 
 if __name__ == '__main__':
     main()

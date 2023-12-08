@@ -1,7 +1,7 @@
 # File Name: get_nelson_data.py
 # Author: Christopher Parker
 # Created: Thu Apr 27, 2023 | 05:10P EDT
-# Last Modified: Thu Sep 14, 2023 | 02:37P EDT
+# Last Modified: Mon Dec 04, 2023 | 03:06P EST
 
 import os
 import torch
@@ -80,6 +80,8 @@ class NonAugmentedDataset(Dataset):
                 X = normalize_nelson_data(X)
             case 'Standardize':
                 X = standardize_nelson_data(X)
+            case 'StandardizeAbleson':
+                X = standardize_ableson_data(X)
             case 'NormalizeAll':
                 X = normalize_data(X)
             case 'StandardizeAll':
@@ -99,7 +101,7 @@ class NonAugmentedDataset(Dataset):
     def __getitem__(self, idx: int):
         "Get the requested patient data and label for index idx"
         if self.individual_number and len(self.patient_groups) == 1:
-            return self.X, self.y
+            return self.X.to(torch.float32), self.y.to(torch.float32)
         if self.sim and len(self.patient_groups) == 1:
             return self.X, self.y
         return self.X[idx,...], self.y[idx]
@@ -144,7 +146,7 @@ class AblesonData(NonAugmentedDataset):
     """This class loads the original Ableson TSST data, with no
     virtual patients included"""
     def __init__(self, patient_groups: list[str],
-                 normalize_standardize: str,
+                 normalize_standardize: str, individual_number: int=0,
                  data_dir: str='Ableson TSST Individual Patient Data '
                                '(Without First 30 Min)'):
         super().__init__(data_dir, normalize_standardize)
@@ -154,10 +156,11 @@ class AblesonData(NonAugmentedDataset):
             patient_groups[patient_groups.index('Atypical')] = 'MDD'
         # Length and label for each patient group in the dataset
         self.group_info = {
-            'Control': (37, 0),
-            'MDD': (13, 1),
+            'Control': [37, 0],
+            'MDD': [13, 1],
         }
         self.patient_groups = patient_groups
+        self.individual_number = individual_number
 
         # Loop through the patient groups calling self.load_group
         for group in self.patient_groups:
@@ -169,6 +172,10 @@ class AblesonData(NonAugmentedDataset):
             )
         self.X = self.norm_data(self.X)
 
+        if len(patient_groups) == 1 and individual_number:
+            self.group_info[patient_groups[0]][0] = 1
+            self.X = self.X[individual_number-1,...]
+            self.y = self.y[individual_number-1]
 
 class SriramSimulation(NonAugmentedDataset):
     """This class loads the original Nelson TSST data, with no
@@ -203,8 +210,7 @@ class SriramSimulation(NonAugmentedDataset):
                 X=self.X, y=self.y
             )
 
-        self.X = self.norm_data(self.X)
-
+        # self.X = self.norm_data(self.X)
 
 
 def normalize_time_series(series_tensor):
@@ -220,10 +226,10 @@ def normalize_time_series(series_tensor):
 def normalize_nelson_data(X: torch.Tensor):
     """Normalize the ACTH and CORT of Nelson patients with the min and range of
     all patients in the dataset"""
-    ACTHmin = torch.tensor(5.6, dtype=float)
-    CORTmin = torch.tensor(2., dtype=float)
-    ACTHrange = torch.tensor(111., dtype=float)
-    CORTrange = torch.tensor(44., dtype=float)
+    ACTHmin = torch.tensor(5.6, dtype=torch.float32)
+    CORTmin = torch.tensor(2., dtype=torch.float32)
+    ACTHrange = torch.tensor(160.5, dtype=torch.float32)
+    CORTrange = torch.tensor(44., dtype=torch.float32)
     for series in X[...,1]:
         series -= ACTHmin
         series /= ACTHrange
@@ -236,10 +242,26 @@ def normalize_nelson_data(X: torch.Tensor):
 def standardize_nelson_data(X: torch.Tensor):
     """Standardize the ACTH and CORT of Nelson patients with the mean and std
     of all patients in the dataset"""
-    ACTHmean = torch.tensor(23.2961, dtype=float)
-    CORTmean = torch.tensor(9.0687, dtype=float)
-    ACTHstd = torch.tensor(11.1307, dtype=float)
-    CORTstd = torch.tensor(5.4818, dtype=float)
+    ACTHmean = torch.tensor(23.2961, dtype=torch.float32)
+    CORTmean = torch.tensor(9.0687, dtype=torch.float32)
+    ACTHstd = torch.tensor(11.1307, dtype=torch.float32)
+    CORTstd = torch.tensor(5.4818, dtype=torch.float32)
+    for series in X[...,1]:
+        series -= ACTHmean
+        series /= ACTHstd
+    for series in X[...,2]:
+        series -= CORTmean
+        series /= CORTstd
+    return X
+
+
+def standardize_ableson_data(X: torch.Tensor):
+    """Standardize the ACTH and CORT of Nelson patients with the mean and std
+    of all patients in the dataset"""
+    ACTHmean = torch.tensor(21.31, dtype=torch.float32)
+    CORTmean = torch.tensor(10.043, dtype=torch.float32)
+    ACTHstd = torch.tensor(12.462, dtype=torch.float32)
+    CORTstd = torch.tensor(4.2194, dtype=torch.float32)
     for series in X[...,1]:
         series -= ACTHmean
         series /= ACTHstd

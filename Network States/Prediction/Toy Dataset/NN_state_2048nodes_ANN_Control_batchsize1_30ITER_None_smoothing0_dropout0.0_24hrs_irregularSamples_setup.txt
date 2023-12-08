@@ -1,0 +1,41 @@
+Model Setup for {PATIENT_GROUPS} Trained Network:
+
+{NETWORK_TYPE} Network Architecture Parameters
+Input channels=1
+Hidden channels=2048
+Output channels=4
+
+Training hyperparameters
+Optimizer=AdamW (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 5e-05
+    maximize: False
+    weight_decay: 0.0
+)Training Iterations=30
+Learning rate=5e-05
+Weight decay=0.0
+Optimizer reset frequency=None
+
+Dropout probability (after initial linear layer before NCDE): 0.0
+Training Data Selection Parameters
+(If not virtual, the only important params are the groups and whether data was normalized/standardized)
+Patient groups=['Control']
+Augmentation strategy=Uniform
+Noise Magnitude=0.0
+Normalized/standardized=None
+Number of virtual patients per real patient=100
+Label smoothing factor=0
+Test Patient Combinations:
+Control: None
+MDD: None
+Training batch size=1
+Training Results:
+Runtime=114.19181895256042
+Loss over time=[(0, 28.969287150304066), (0, 23.516121139973816), (0, 22.005875436703256), (0, 13.994268560450896), (0, 14.013732742632142), (0, 13.344095159786407), (0, 12.164801070117317), (0, 10.942742628162435), (0, 9.912455787046525), (0, 9.165093433097821), (0, 8.69115897386842), (0, 8.477309566339152), (0, 9.745541406149156), (0, 8.538700480478436), (0, 7.63954577561366), (0, 7.196875725398765), (0, 6.875796441317641), (0, 6.697860877668872), (0, 6.648381817401244), (0, 7.0679509148338635), (0, 7.732254402555933), (0, 8.535307830204165), (0, 9.399472097193783), (0, 10.27155572284007), (0, 11.11720681632971), (0, 11.91569115126731), (0, 12.655958004304598), (0, 13.343600110719482), (0, 13.934923278716692), (0, 14.48200862712788)]

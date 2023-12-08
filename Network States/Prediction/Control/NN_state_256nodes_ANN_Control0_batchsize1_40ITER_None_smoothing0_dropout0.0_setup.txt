@@ -1,0 +1,41 @@
+Model Setup for {PATIENT_GROUPS} Trained Network:
+
+{NETWORK_TYPE} Network Architecture Parameters
+Input channels=1
+Hidden channels=256
+Output channels=4
+
+Training hyperparameters
+Optimizer=AdamW (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.003
+    maximize: False
+    weight_decay: 1e-06
+)Training Iterations=40
+Learning rate=0.003
+Weight decay=1e-06
+Optimizer reset frequency=None
+
+Dropout probability (after initial linear layer before NCDE): 0.0
+Training Data Selection Parameters
+(If not virtual, the only important params are the groups and whether data was normalized/standardized)
+Patient groups=['Control']
+Augmentation strategy=Uniform
+Noise Magnitude=0.0
+Normalized/standardized=None
+Number of virtual patients per real patient=100
+Label smoothing factor=0
+Test Patient Combinations:
+Control: None
+MDD: None
+Training batch size=1
+Training Results:
+Runtime=123.54730319976807
+Loss over time=[(0, 27.817383983746694), (0, 15.107106393049971), (0, 11.595784437452668), (0, 10.30020423796445), (0, 8.484164423021282), (0, 7.878828286789865), (0, 6.466078100557071), (0, 7.144528804391542), (0, 6.616215618575014), (0, 6.520550055483614), (0, 6.3019629150219565), (0, 5.978821161174201), (0, 5.637226668167137), (0, 5.242503136490472), (0, 4.742369809488007), (0, 4.123198840990161), (0, 3.4186135280957908), (0, 2.7147677417605727), (0, 2.2354716053945443), (0, 5809.034558701779), (0, 2.7543941548689634), (0, 4.794069325420583), (0, 15.758559530408657), (0, 6.942761308237273), (0, 7.053109548043246), (0, 6.6180944692763894), (0, 6.242557661939506), (0, 6.028817784162547), (0, 5.982237142402932), (0, 5.991924083428167), (0, 5.948398586758486), (0, 5.821432936237417), (0, 5.658675340373256), (0, 6.276203130957429), (0, 5.453483250360777), (0, 5.31433089238454), (0, 4.9059225058337175), (0, 4.74301631785673), (0, 5.459547429361315), (0, 4.972700518560749)]
