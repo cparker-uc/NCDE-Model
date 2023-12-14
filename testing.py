@@ -108,6 +108,7 @@ def test(hyperparameters: dict, virtual: bool=True,
         )
         # Load the dataset for training
         loader, (t_steps, t_start, t_end) = load_data(
+            virtual=virtual,
             control_combination=control_combination,
             mdd_combination=mdd_combination,
             patient_groups=PATIENT_GROUPS, by_lab=by_lab,
@@ -123,6 +124,7 @@ def test(hyperparameters: dict, virtual: bool=True,
             't_steps': t_steps,
             't_start': t_start,
             't_end': t_end,
+            'virtual': virtual,
         }
         model = model_init(info)
         with torch.no_grad():
@@ -195,6 +197,15 @@ def load_data(virtual: bool=True, pop_number: int=0,
         dataset = SriramSimulation(
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE
+        )
+    elif not virtual and control_combination:
+        dataset = NelsonData(
+            test=True,
+            patient_groups=patient_groups,
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+            individual_number=INDIVIDUAL_NUMBER,
+            control_combination=control_combination,
+            mdd_combination=mdd_combination,
         )
     elif not virtual:
         dataset = NelsonData(
@@ -284,7 +295,7 @@ def model_init(info: dict):
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
             t_interval=torch.linspace(t_start, t_end, 1000),
             device=DEVICE, dropout=DROPOUT, prediction=not CLASSIFY
-        ).double()
+        )
     if NETWORK_TYPE == 'NODE':
         return NeuralODE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
@@ -346,6 +357,8 @@ def classification_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict
         index = [i for i in range(50)]
     elif toy_data:
         index = [i for i in range(2000)]
+    elif not virtual:
+        index = [i for i in range(29)]
     else:
         index = [i for i in range(5)]
         index = index+index
@@ -376,9 +389,19 @@ def classification_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict
     index = tuple(tmp_index)
 
     # Set the directory name where the model state dictionaries are located
-    if not virtual:
+    if not virtual and control_combination:
         directory = (
             f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    elif not virtual:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'Control vs {PATIENT_GROUPS[1]}/'
         )
     elif toy_data:
@@ -2454,7 +2477,16 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
 
     # Set the directory name based on which type of dataset was used for the
     #  training
-    if not virtual:
+    if not virtual and control_combination:
+        directory = (
+            f'Results/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    elif not virtual:
         directory = (
             f'Results/'
             f'{"Classification" if CLASSIFY else "Prediction"}/'

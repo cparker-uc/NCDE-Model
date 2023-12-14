@@ -1,47 +1,47 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Sat Nov 25, 2023 | 06:57P EST
+# Last Modified: Mon Dec 11, 2023 | 07:12P EST
 
 "Root file for classification of augmented TSST or simulation data"
 
 # Network architecture parameters
-NETWORK_TYPE = 'NODE' # NCDE, NODE, ANN or RNN
+NETWORK_TYPE = 'NCDE' # NCDE, NODE, ANN or RNN
 # Should be 40 for Toy dataset or 22 for others if using ANN or RNN
 # If using NCDE, should be the number of vars plus 1, since we include time
 # If using NODE, should just be the number of vars
-INPUT_CHANNELS = 2
+INPUT_CHANNELS = 3
 HDIM = 32
 # Needs to be 2 for NODE (even though it will be run through readout to combine down to 1)
-OUTPUT_CHANNELS = 2
+OUTPUT_CHANNELS = 1
 
 # Only necessary for RNN
 N_LAYERS = 1
 SEQ_LENGTH = 11
 
-CLASSIFY = False
+CLASSIFY = True
 MECHANISTIC = False
 
 # Training hyperparameters
-ITERS = 5000
-SAVE_FREQ = 1000
+ITERS = 200
+SAVE_FREQ = 100
 LR = 1e-3
 DECAY = 1e-6
-OPT_RESET = 200
+OPT_RESET = None
 ATOL = 1e-9
 RTOL = 1e-7
 
 # Training data selection parameters
 POP = 'NelsonOnly'
-PATIENT_GROUPS = ['Atypical'] # Only necessary for POP='NelsonOnly' or 'AblesonOnly'
-INDIVIDUAL_NUMBER = 1 # Same
+PATIENT_GROUPS = ['Control', 'Atypical'] # Only necessary for POP='NelsonOnly' or 'AblesonOnly'
+INDIVIDUAL_NUMBER = 0 # Same
 METHOD = 'Uniform'
 NORMALIZE_STANDARDIZE = None
 NOISE_MAGNITUDE = 0.05
 IRREGULAR_T_SAMPLES = False
 NUM_PER_PATIENT = 100
 POP_NUMBER = 0
-BATCH_SIZE = 1
+BATCH_SIZE = 3
 LABEL_SMOOTHING = 0
 DROPOUT = 0.0
 CORT_ONLY = False
@@ -142,9 +142,7 @@ if __name__ == "__main__":
     patient_groups = set_patient_groups(POP.lower())
     if POP.lower() not in ['toydata', 'ablesononly']:
         perms = PERMUTATIONS[POP.lower()]
-    else:
-        perms = None
-    if POP == 'nelsononly' and not INDIVIDUAL_NUMBER:
+    if POP.lower() == 'nelsononly' and not INDIVIDUAL_NUMBER:
         match patient_groups[1]:
             case 'Atypical':
                 perms = [perms[0], perms[1]]
@@ -152,6 +150,8 @@ if __name__ == "__main__":
                 perms = [perms[0], perms[2]]
             case 'Neither':
                 perms = [perms[0], perms[3]]
+    else:
+        perms = None
         # If not using Python 3.11:
         # if patient_groups[1] == "Atypical":
         #     perms = [perms[0], perms[1]]
@@ -162,90 +162,88 @@ if __name__ == "__main__":
 
     try:
         if sys.argv[1].lower() == 'train':
-            for INDIVIDUAL_NUMBER in range(1,15):
-                train(
-                    hyperparameters={
-                        'NETWORK_TYPE': NETWORK_TYPE,
-                        'INPUT_CHANNELS': INPUT_CHANNELS,
-                        'HDIM': HDIM,
-                        'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
-                        'N_LAYERS': N_LAYERS,
-                        'SEQ_LENGTH': SEQ_LENGTH,
-                        'CLASSIFY': CLASSIFY,
-                        'MECHANISTIC': MECHANISTIC,
-                        'ITERS': ITERS,
-                        'SAVE_FREQ': SAVE_FREQ,
-                        'LR': LR,
-                        'DECAY': DECAY,
-                        'OPT_RESET': OPT_RESET,
-                        'ATOL': ATOL,
-                        'RTOL': RTOL,
-                        'PATIENT_GROUPS': patient_groups,
-                        'INDIVIDUAL_NUMBER': INDIVIDUAL_NUMBER,
-                        'METHOD': METHOD,
-                        'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
-                        'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
-                        'IRREGULAR_T_SAMPLES': IRREGULAR_T_SAMPLES,
-                        'NUM_PER_PATIENT': NUM_PER_PATIENT,
-                        'POP_NUMBER': POP_NUMBER,
-                        'BATCH_SIZE': BATCH_SIZE,
-                        'LABEL_SMOOTHING': LABEL_SMOOTHING,
-                        'DROPOUT': DROPOUT,
-                        'CORT_ONLY': CORT_ONLY,
-                        'T_END': T_END,
-                        'DEVICE': DEVICE,
-                    },
-                    virtual=False,
-                    ableson_pop=False,
-                    # permutations=perms,
-                    # ctrl_range=CTRL_RANGE,
-                    # mdd_range=MDD_RANGE,
-                    plus_ableson_mdd=True if POP.lower()=='plusablesonmdd0and12' else False,
-                    toy_data=True if POP.lower()=='toydata' else False
-                )
+            train(
+                hyperparameters={
+                    'NETWORK_TYPE': NETWORK_TYPE,
+                    'INPUT_CHANNELS': INPUT_CHANNELS,
+                    'HDIM': HDIM,
+                    'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
+                    'N_LAYERS': N_LAYERS,
+                    'SEQ_LENGTH': SEQ_LENGTH,
+                    'CLASSIFY': CLASSIFY,
+                    'MECHANISTIC': MECHANISTIC,
+                    'ITERS': ITERS,
+                    'SAVE_FREQ': SAVE_FREQ,
+                    'LR': LR,
+                    'DECAY': DECAY,
+                    'OPT_RESET': OPT_RESET,
+                    'ATOL': ATOL,
+                    'RTOL': RTOL,
+                    'PATIENT_GROUPS': patient_groups,
+                    'INDIVIDUAL_NUMBER': INDIVIDUAL_NUMBER,
+                    'METHOD': METHOD,
+                    'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
+                    'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
+                    'IRREGULAR_T_SAMPLES': IRREGULAR_T_SAMPLES,
+                    'NUM_PER_PATIENT': NUM_PER_PATIENT,
+                    'POP_NUMBER': POP_NUMBER,
+                    'BATCH_SIZE': BATCH_SIZE,
+                    'LABEL_SMOOTHING': LABEL_SMOOTHING,
+                    'DROPOUT': DROPOUT,
+                    'CORT_ONLY': CORT_ONLY,
+                    'T_END': T_END,
+                    'DEVICE': DEVICE,
+                },
+                virtual=False,
+                ableson_pop=False,
+                permutations=perms,
+                ctrl_range=CTRL_RANGE,
+                mdd_range=MDD_RANGE,
+                plus_ableson_mdd=True if POP.lower()=='plusablesonmdd0and12' else False,
+                toy_data=True if POP.lower()=='toydata' else False
+            )
         elif sys.argv[1].lower() == 'test':
-            for INDIVIDUAL_NUMBER in range(1,15):
-                test(
-                    hyperparameters={
-                        'NETWORK_TYPE': NETWORK_TYPE,
-                        'INPUT_CHANNELS': INPUT_CHANNELS,
-                        'HDIM': HDIM,
-                        'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
-                        'N_LAYERS': N_LAYERS,
-                        'SEQ_LENGTH': SEQ_LENGTH,
-                        'CLASSIFY': CLASSIFY,
-                        'MECHANISTIC': MECHANISTIC,
-                        'ITERS': ITERS,
-                        'SAVE_FREQ': SAVE_FREQ,
-                        'LR': LR,
-                        'DECAY': DECAY,
-                        'OPT_RESET': OPT_RESET,
-                        'ATOL': ATOL,
-                        'RTOL': RTOL,
-                        'PATIENT_GROUPS': patient_groups,
-                        'INDIVIDUAL_NUMBER': INDIVIDUAL_NUMBER,
-                        'METHOD': METHOD,
-                        'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
-                        'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
-                        'IRREGULAR_T_SAMPLES': IRREGULAR_T_SAMPLES,
-                        'NUM_PER_PATIENT': NUM_PER_PATIENT,
-                        'POP_NUMBER': POP_NUMBER,
-                        'BATCH_SIZE': BATCH_SIZE,
-                        'LABEL_SMOOTHING': LABEL_SMOOTHING,
-                        'DROPOUT': DROPOUT,
-                        'CORT_ONLY': CORT_ONLY,
-                        'MAX_ITR': ITERS,
-                        'T_END': T_END,
-                        'DEVICE': DEVICE,
-                    },
-                    virtual=False,
-                    ableson_pop=False,
-                    # permutations=perms,
-                    # ctrl_range=CTRL_RANGE,
-                    # mdd_range=MDD_RANGE,
-                    plus_ableson_mdd=True if POP.lower()=='plusablesonmdd0and12' else False,
-                    toy_data=True if POP.lower()=='toydata' else False
-                )
+            test(
+                hyperparameters={
+                    'NETWORK_TYPE': NETWORK_TYPE,
+                    'INPUT_CHANNELS': INPUT_CHANNELS,
+                    'HDIM': HDIM,
+                    'OUTPUT_CHANNELS': OUTPUT_CHANNELS,
+                    'N_LAYERS': N_LAYERS,
+                    'SEQ_LENGTH': SEQ_LENGTH,
+                    'CLASSIFY': CLASSIFY,
+                    'MECHANISTIC': MECHANISTIC,
+                    'ITERS': ITERS,
+                    'SAVE_FREQ': SAVE_FREQ,
+                    'LR': LR,
+                    'DECAY': DECAY,
+                    'OPT_RESET': OPT_RESET,
+                    'ATOL': ATOL,
+                    'RTOL': RTOL,
+                    'PATIENT_GROUPS': patient_groups,
+                    'INDIVIDUAL_NUMBER': INDIVIDUAL_NUMBER,
+                    'METHOD': METHOD,
+                    'NORMALIZE_STANDARDIZE': NORMALIZE_STANDARDIZE,
+                    'NOISE_MAGNITUDE': NOISE_MAGNITUDE,
+                    'IRREGULAR_T_SAMPLES': IRREGULAR_T_SAMPLES,
+                    'NUM_PER_PATIENT': NUM_PER_PATIENT,
+                    'POP_NUMBER': POP_NUMBER,
+                    'BATCH_SIZE': BATCH_SIZE,
+                    'LABEL_SMOOTHING': LABEL_SMOOTHING,
+                    'DROPOUT': DROPOUT,
+                    'CORT_ONLY': CORT_ONLY,
+                    'MAX_ITR': ITERS,
+                    'T_END': T_END,
+                    'DEVICE': DEVICE,
+                },
+                virtual=False,
+                ableson_pop=False,
+                permutations=perms,
+                ctrl_range=CTRL_RANGE,
+                mdd_range=MDD_RANGE,
+                plus_ableson_mdd=True if POP.lower()=='plusablesonmdd0and12' else False,
+                toy_data=True if POP.lower()=='toydata' else False
+            )
         else:
             usage_hint()
     except IndexError:

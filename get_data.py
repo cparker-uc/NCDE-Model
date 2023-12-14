@@ -26,6 +26,8 @@ class NonAugmentedDataset(Dataset):
         self.patient_groups = []
         self.individual_number = 0
         self.sim = False
+        self.combinations = False
+        self.test = False
 
         # self.X contains 11 time points with 3 input channels
         #  (time, ACTH, CORT) for each time
@@ -96,6 +98,11 @@ class NonAugmentedDataset(Dataset):
         length = 0
         for group in self.patient_groups:
             length += self.group_info[group][0]
+        if self.combinations:
+            if not self.test:
+                length -= len(self.combinations)
+            else:
+                length = len(self.combinations)
         return length
 
     def __getitem__(self, idx: int):
@@ -112,7 +119,8 @@ class NelsonData(NonAugmentedDataset):
     virtual patients included"""
     def __init__(self, patient_groups: list[str],
                  normalize_standardize: str, individual_number: int=0,
-                 data_dir: str='Nelson TSST Individual Patient Data'):
+                 data_dir: str='Nelson TSST Individual Patient Data',
+                 control_combination=None, mdd_combination=None, test=False):
         super().__init__(data_dir, normalize_standardize)
 
         # Length and label for each patient group in the dataset
@@ -135,6 +143,16 @@ class NelsonData(NonAugmentedDataset):
             )
 
         self.X = self.norm_data(self.X)
+
+        self.test = test
+        if control_combination and mdd_combination:
+            self.combinations = list(control_combination) + list(mdd_combination)
+            if test:
+                mask = [i in control_combination for i in range(15)]+[i in mdd_combination for i in range(self.group_info[self.patient_groups[1]][0])]
+            else:
+                mask = [i not in control_combination for i in range(15)]+[i not in mdd_combination for i in range(self.group_info[self.patient_groups[1]][0])]
+            self.X = self.X[mask].squeeze()
+            self.y = self.y[mask].squeeze()
 
         if len(patient_groups) == 1 and individual_number:
             self.group_info[patient_groups[0]][0] = 1

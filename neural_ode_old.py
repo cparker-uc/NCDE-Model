@@ -2,7 +2,7 @@
 # File Name: neural_ode.py
 # Author: Christopher Parker
 # Created: Mon Aug 14, 2023 | 11:02P EDT
-# Last Modified: Mon Dec 04, 2023 | 02:50P EST
+# Last Modified: Wed Dec 13, 2023 | 01:41P EST
 
 """Contains the class for running NODE training"""
 
@@ -33,7 +33,7 @@ class NeuralODE(nn.Module):
 
     def forward(self, t, y):
         """t is unnecessary, but still passed by the NODE solver"""
-        return self.net(y)
+        return self.hpa_net(y)
 
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#

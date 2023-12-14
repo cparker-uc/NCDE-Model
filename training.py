@@ -115,6 +115,7 @@ def train(hyperparameters: dict, virtual: bool=True,
         )
         # Load the dataset for training
         loader, (t_steps, t_start, t_end, t_eval) = load_data(
+            virtual=virtual,
             control_combination=control_combination,
             mdd_combination=mdd_combination, by_lab=by_lab,
             plus_ableson_mdd=plus_ableson_mdd
@@ -152,7 +153,10 @@ def train_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False,
     }
     model = model_init(info)
 
-    domain = torch.linspace(0, T_END, SEQ_LENGTH, requires_grad=True, dtype=torch.double).to(DEVICE)
+    if MECHANISTIC:
+        domain = torch.linspace(0, T_END, SEQ_LENGTH, requires_grad=True, dtype=torch.double).to(DEVICE)
+    else:
+        domain = None
 
     if MECHANISTIC and not toy_data:
         params = param_init_tsst(model)
@@ -191,6 +195,13 @@ def load_data(virtual: bool=True, pop_number: int=0,
         dataset = SriramSimulation(
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE
+        )
+    elif not virtual and control_combination:
+        dataset = NelsonData(
+            patient_groups=patient_groups,
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+            control_combination=control_combination,
+            mdd_combination=mdd_combination,
         )
     elif not virtual:
         dataset = NelsonData(
@@ -301,7 +312,7 @@ def model_init(info: dict):
         return NeuralODE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
             device=DEVICE
-        ).double()
+        )
     elif NETWORK_TYPE == 'ANN':
         return ANN(
             INPUT_CHANNELS*t_steps if not MECHANISTIC else INPUT_CHANNELS, HDIM,
@@ -325,26 +336,26 @@ def model_init(info: dict):
 def param_init(model: nn.Module):
     """Initialize the parameters for the mechanistic loss, and set them to
     require gradient"""
-    k_stress = torch.nn.Parameter(torch.tensor(10.1, device=DEVICE, dtype=torch.float64), requires_grad=False)
-    Ki = torch.nn.Parameter(torch.tensor(1.51, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    VS3 = torch.nn.Parameter(torch.tensor(3.25, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    Km1 = torch.nn.Parameter(torch.tensor(1.74, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    KP2 = torch.nn.Parameter(torch.tensor(8.3, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    VS4 = torch.nn.Parameter(torch.tensor(0.907, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    Km2 = torch.nn.Parameter(torch.tensor(0.112, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    KP3 = torch.nn.Parameter(torch.tensor(0.945, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    VS5 = torch.nn.Parameter(torch.tensor(0.00535, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    Km3 = torch.nn.Parameter(torch.tensor(0.0768, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    Kd1 = torch.nn.Parameter(torch.tensor(0.00379, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    Kd2 = torch.nn.Parameter(torch.tensor(0.00916, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    Kd3 = torch.nn.Parameter(torch.tensor(0.356, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    n1 = torch.nn.Parameter(torch.tensor(5.43, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    n2 = torch.nn.Parameter(torch.tensor(5.1, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    Kb = torch.nn.Parameter(torch.tensor(0.0202, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    Gtot = torch.nn.Parameter(torch.tensor(3.28, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    VS2 = torch.nn.Parameter(torch.tensor(0.0509, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    K1 = torch.nn.Parameter(torch.tensor(0.645, device=DEVICE, dtype=torch.float64), requires_grad=True)
-    Kd5 = torch.nn.Parameter(torch.tensor(0.0854, device=DEVICE, dtype=torch.float64), requires_grad=True)
+    k_stress = torch.nn.Parameter(torch.tensor(10.1, device=DEVICE, dtype=torch.float32), requires_grad=False)
+    Ki = torch.nn.Parameter(torch.tensor(1.51, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    VS3 = torch.nn.Parameter(torch.tensor(3.25, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    Km1 = torch.nn.Parameter(torch.tensor(1.74, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    KP2 = torch.nn.Parameter(torch.tensor(8.3, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    VS4 = torch.nn.Parameter(torch.tensor(0.907, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    Km2 = torch.nn.Parameter(torch.tensor(0.112, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    KP3 = torch.nn.Parameter(torch.tensor(0.945, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    VS5 = torch.nn.Parameter(torch.tensor(0.00535, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    Km3 = torch.nn.Parameter(torch.tensor(0.0768, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    Kd1 = torch.nn.Parameter(torch.tensor(0.00379, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    Kd2 = torch.nn.Parameter(torch.tensor(0.00916, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    Kd3 = torch.nn.Parameter(torch.tensor(0.356, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    n1 = torch.nn.Parameter(torch.tensor(5.43, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    n2 = torch.nn.Parameter(torch.tensor(5.1, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    Kb = torch.nn.Parameter(torch.tensor(0.0202, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    Gtot = torch.nn.Parameter(torch.tensor(3.28, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    VS2 = torch.nn.Parameter(torch.tensor(0.0509, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    K1 = torch.nn.Parameter(torch.tensor(0.645, device=DEVICE, dtype=torch.float32), requires_grad=True)
+    Kd5 = torch.nn.Parameter(torch.tensor(0.0854, device=DEVICE, dtype=torch.float32), requires_grad=True)
     kdStress = torch.nn.Parameter(torch.tensor(0.19604, device=DEVICE), requires_grad=True)
     stressStr = torch.nn.Parameter(torch.tensor(1., device=DEVICE), requires_grad=True)
 
@@ -477,7 +488,7 @@ def run_training(model: NeuralODE | NeuralCDE | ANN | RNN, loader: DataLoader,
     # Only necessary for NODE and RNN
     readout = None
     if NETWORK_TYPE == 'NODE':
-        readout = nn.Linear(OUTPUT_CHANNELS, 1).double().to(DEVICE)
+        readout = nn.Linear(OUTPUT_CHANNELS, 1).to(DEVICE)
     # elif NETWORK_TYPE == 'RNN':
     #     readout = nn.Linear(HDIM, 1).double().to(DEVICE)
 
@@ -712,7 +723,8 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
             data = data[...,[2,3]]
         else:
             data = data[...,1:]
-        data = data.double().to(DEVICE)
+        # data = data.double().to(DEVICE)
+        data = data.to(DEVICE)
         labels = labels.to(DEVICE) if CLASSIFY else data
         y0 = data[:,0,:].to(DEVICE)
 
@@ -1287,6 +1299,15 @@ def save_network(model: NeuralCDE | NeuralODE | ANN | RNN,
             f'Network States/'
             f'{"Classification" if CLASSIFY else "Prediction"}/'
             f'{PATIENT_GROUPS[0] if not toy_data else "Toy Dataset"}/'
+        )
+    elif not virtual and control_combination:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+            f'{PATIENT_GROUPS[0]} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1]} {mdd_num} {mdd_combination}/'
         )
     elif not virtual:
         directory = (
