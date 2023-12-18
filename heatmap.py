@@ -2,25 +2,29 @@
 # Description: 
 # Author: Christopher Parker
 # Created: Wed Dec 13, 2023 | 11:33P EST
-# Last Modified: Thu Dec 14, 2023 | 09:05P EST
+# Last Modified: Thu Dec 14, 2023 | 03:16P EST
 
 import torch
 import matplotlib.pyplot as plt
 
 control_model_state = torch.load('/Users/christopher/Documents/PTSD/NCDE Model.nosync/Network States/Old Individual Fittings (11 nodes)/ControlPatient0.txt')
-atypical_model_state = torch.load('/Users/christopher/Documents/PTSD/NCDE Model.nosync/Network States/Old Individual Fittings (11 nodes)/AtypicalPatient0.txt')
+# atypical_model_state = torch.load('/Users/christopher/Documents/PTSD/NCDE Model.nosync/Network States/Old Individual Fittings (11 nodes)/AtypicalPatient0.txt')
 
 control_mat = control_model_state['hpa_net.2.weight']
-atypical_mat = atypical_model_state['hpa_net.2.weight']
+# atypical_mat = atypical_model_state['hpa_net.2.weight']
 
-fig, (ax1, ax2) = plt.subplots(ncols=2, gridspec_kw={'width_ratios': [1, 1.25]})
+fig, ax = plt.subplots()
+hmap = ax.imshow(control_mat, cmap='hot')
+fig.colorbar(hmap)
+ax.set_title('Nelson Control Patient 1 NODE Weight Matrix Heatmap')
+# fig, (ax1, ax2) = plt.subplots(ncols=2, gridspec_kw={'width_ratios': [1, 1.25]})
 
-control_hmap = ax1.imshow(control_mat, cmap='hot')
-atypical_hmap = ax2.imshow(atypical_mat, cmap='hot')
-fig.colorbar(atypical_hmap)
-fig.suptitle('Nelson Control vs Atypical NODE Weight Heatmaps')
-ax1.set_title('Control')
-ax2.set_title('Atypical')
+# control_hmap = ax1.imshow(control_mat, cmap='hot')
+# atypical_hmap = ax2.imshow(atypical_mat, cmap='hot')
+# fig.colorbar(atypical_hmap)
+# fig.suptitle('Nelson Control vs Atypical NODE Weight Heatmaps')
+# ax1.set_title('Control')
+# ax2.set_title('Atypical')
 
 plt.show()
 

@@ -1,7 +1,7 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Wed Nov 29, 2023 | 01:14P EST
+# Last Modified: Fri Dec 15, 2023 | 01:37P EST
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
@@ -16,7 +16,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from copy import copy
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 from torch.nn.functional import binary_cross_entropy_with_logits, mse_loss
 from torchdiffeq import odeint_adjoint
 from scipy.integrate import odeint
@@ -198,6 +198,45 @@ def load_data(virtual: bool=True, pop_number: int=0,
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE
         )
+    elif not virtual and control_combination and patient_groups[1]=='MDD':
+        # Pretty annoying training with non-augmented data from both labs,
+        #  I'm just going to load the raw data then mask it to remove the
+        #  test patients (and I'll do the opposite mask when testing)
+        nelson_control = NelsonData(
+            patient_groups=[patient_groups[0]],
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+        )
+        nelson_mdd = NelsonData(
+            patient_groups=['Atypical', 'Melancholic', 'Neither'],
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+        )
+        ableson_control = AblesonData(
+            patient_groups=[patient_groups[0]],
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+        )
+        ableson_mdd = AblesonData(
+            patient_groups=[patient_groups[1]],
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+        )
+
+        control_dataset_tmp = ConcatDataset((nelson_control, ableson_control))
+        mdd_dataset_tmp = ConcatDataset((nelson_mdd, ableson_mdd))
+
+        control_mask = [i in control_combination for i in range(len(control_dataset_tmp))]
+        mdd_mask = [i in mdd_combination for i in range(len(mdd_dataset_tmp))]
+
+        # Pretty frustrating that Datasets can't just handle masks as indices
+        control_dataset = []
+        for i in range(len(control_dataset_tmp)):
+            if control_mask[i]:
+                control_dataset.append(control_dataset_tmp[i])
+        mdd_dataset = []
+        for i in range(len(mdd_dataset_tmp)):
+            if mdd_mask[i]:
+                mdd_dataset.append(mdd_dataset_tmp[i])
+
+        dataset = ConcatDataset((control_dataset, mdd_dataset))
+
     elif not virtual and control_combination:
         dataset = NelsonData(
             test=True,
@@ -295,12 +334,12 @@ def model_init(info: dict):
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
             t_interval=torch.linspace(t_start, t_end, 1000),
             device=DEVICE, dropout=DROPOUT, prediction=not CLASSIFY
-        )
+        ).double()
     if NETWORK_TYPE == 'NODE':
         return NeuralODE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
             device=DEVICE,
-        ).double()
+        )
     if NETWORK_TYPE == 'ANN':
         if MECHANISTIC:
             return ANN(
@@ -484,11 +523,12 @@ def classification_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict
             # Ensure the data is only CORT if CORT_ONLY, and that the data and
             #  labels are loaded into the proper device memory
             (data, labels) = batch
+            model = model.double()
             if CORT_ONLY:
                 data = data[...,[0,2]]
             if toy_data and INPUT_CHANNELS == 3:
                 data = data[...,[0,2,3]]
-            data = data.to(DEVICE)
+            data = data.to(DEVICE).double()
             labels = labels.to(DEVICE) if CLASSIFY else data
             coeffs = torchcde.\
                 hermite_cubic_coefficients_with_backward_differences(data)
@@ -602,7 +642,16 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
     index = tuple(tmp_index)
 
     # Set the directory name where the model state dictionaries are located
-    if not virtual:
+    if not virtual and PATIENT_GROUPS[1] == 'MDD':
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    elif not virtual:
         directory = (
             f'Network States/'
             f'{"Classification" if CLASSIFY else "Prediction"}/'
@@ -685,6 +734,7 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
         model.load_state_dict(state_dict)
         readout = nn.Linear(OUTPUT_CHANNELS, 1).double()
         readout.load_state_dict(readout_state_dict)
+        readout = readout.to(torch.float32)
 
         # Pandas Series to allow us to insert the number of iterations for each
         #  group of predicitons only in the first row of the group

@@ -1,7 +1,7 @@
 # File Name: cnn_classification.py
 # Author: Christopher Parker
 # Created: Fri Dec 01, 2023 | 10:50P EST
-# Last Modified: Thu Dec 14, 2023 | 10:24P EST
+# Last Modified: Thu Dec 14, 2023 | 01:15P EST
 
 
 """Use the CNN architecture to classify based on the weight matrices of
@@ -9,8 +9,7 @@ networks trained to fit the data"""
 
 ITERS = 100
 BATCH_SIZE = 1
-DIRECTORY = 'Network States/Old Individual Fittings (32 nodes)'
-ABLESON_DIRECTORY = 'Network States/Ableson Individual Fittings'
+DIRECTORY = 'Network States/Individual Fittings'
 
 from copy import copy
 import os
@@ -49,7 +48,7 @@ def main(combination):
     test_files = copy(files)
     # Remove any extraneous files
     for filename in files:
-        if filename[:3] not in ['Con', 'MDD', 'Aty']:
+        if filename[:3] not in ['Con', 'Aty']:#, 'Mel', 'Nei', 'MDD']:
             train_files.remove(filename)
             test_files.remove(filename)
     # Remove the test patients
@@ -69,7 +68,6 @@ def main(combination):
         test_files.remove(f)
 
     train_data = FittingWeights(DIRECTORY, train_files)
-    train_data2 = FittingWeights(ABLESON_DIRECTORY, train_files)
     loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True)
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-6)
 
@@ -118,7 +116,7 @@ if __name__ == '__main__':
         print(f"\tCumulative Mean = {np.mean(counts)/3}")
         correct_patients.append(idxs)
 
-    torch.save(counts, 'CorrectCount.txt')
-    torch.save(correct_patients, 'CorrectPatients.txt')
+    torch.save(counts, 'AtypicalCorrectCount_refit_NODES.txt')
+    torch.save(correct_patients, 'AtypicalCorrectPatients_refit_NODES.txt')
 
     print(f"Overall success rate: {np.mean(counts)/3}")

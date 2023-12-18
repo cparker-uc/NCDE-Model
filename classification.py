@@ -11,8 +11,7 @@ NETWORK_TYPE = 'NCDE' # NCDE, NODE, ANN or RNN
 # If using NCDE, should be the number of vars plus 1, since we include time
 # If using NODE, should just be the number of vars
 INPUT_CHANNELS = 3
-HDIM = 32
-# Needs to be 2 for NODE (even though it will be run through readout to combine down to 1)
+HDIM = 11
 OUTPUT_CHANNELS = 1
 
 # Only necessary for RNN
@@ -28,28 +27,30 @@ SAVE_FREQ = 100
 LR = 1e-3
 DECAY = 1e-6
 OPT_RESET = None
-ATOL = 1e-9
-RTOL = 1e-7
+ATOL = 1e-6
+RTOL = 1e-4
+ADJOINT_ATOL = 1e-3
+ADJOINT_RTOL = 1e-3
 
 # Training data selection parameters
-POP = 'NelsonOnly'
-PATIENT_GROUPS = ['Control', 'Atypical'] # Only necessary for POP='NelsonOnly' or 'AblesonOnly'
+POP = 'FullVPOP'
+PATIENT_GROUPS = ['Control', 'Neither'] # Only necessary for POP='NelsonOnly' or 'AblesonOnly'
 INDIVIDUAL_NUMBER = 0 # Same
 METHOD = 'Uniform'
-NORMALIZE_STANDARDIZE = None
+NORMALIZE_STANDARDIZE = 'StandardizeAll'
 NOISE_MAGNITUDE = 0.05
 IRREGULAR_T_SAMPLES = False
 NUM_PER_PATIENT = 100
 POP_NUMBER = 0
-BATCH_SIZE = 3
+BATCH_SIZE = 5
 LABEL_SMOOTHING = 0
 DROPOUT = 0.0
 CORT_ONLY = False
 # These variables determine which population groups to train/test using
 #  Should be 3 for both if using NelsonOnly data, 11 for control and 12 for MDD
 #  if using FullVPOP or 12 for control and 10 for MDD if using FullVPOPByLab
-CTRL_RANGE = list(range(3))
-MDD_RANGE = list(range(3))
+CTRL_RANGE = list(range(11))
+MDD_RANGE = list(range(12))
 
 # End time for use with toy dataset (2.35 hours, 10 hours or 24 hours)
 T_END = 140
@@ -58,7 +59,6 @@ T_END = 140
 import sys
 import torch
 
-# from typing import Tuple
 from training import train
 from testing import test
 
@@ -142,7 +142,7 @@ if __name__ == "__main__":
     patient_groups = set_patient_groups(POP.lower())
     if POP.lower() not in ['toydata', 'ablesononly']:
         perms = PERMUTATIONS[POP.lower()]
-    if POP.lower() == 'nelsononly' and not INDIVIDUAL_NUMBER:
+    elif POP.lower() == 'nelsononly' and not INDIVIDUAL_NUMBER:
         match patient_groups[1]:
             case 'Atypical':
                 perms = [perms[0], perms[1]]
@@ -179,6 +179,8 @@ if __name__ == "__main__":
                     'OPT_RESET': OPT_RESET,
                     'ATOL': ATOL,
                     'RTOL': RTOL,
+                    'ADJOINT_ATOL': ADJOINT_ATOL,
+                    'ADJOINT_RTOL': ADJOINT_RTOL,
                     'PATIENT_GROUPS': patient_groups,
                     'INDIVIDUAL_NUMBER': INDIVIDUAL_NUMBER,
                     'METHOD': METHOD,
@@ -193,6 +195,7 @@ if __name__ == "__main__":
                     'CORT_ONLY': CORT_ONLY,
                     'T_END': T_END,
                     'DEVICE': DEVICE,
+                    'POP': POP,
                 },
                 virtual=False,
                 ableson_pop=False,
@@ -220,6 +223,8 @@ if __name__ == "__main__":
                     'OPT_RESET': OPT_RESET,
                     'ATOL': ATOL,
                     'RTOL': RTOL,
+                    'ADJOINT_ATOL': ADJOINT_ATOL,
+                    'ADJOINT_RTOL': ADJOINT_RTOL,
                     'PATIENT_GROUPS': patient_groups,
                     'INDIVIDUAL_NUMBER': INDIVIDUAL_NUMBER,
                     'METHOD': METHOD,
@@ -235,6 +240,7 @@ if __name__ == "__main__":
                     'MAX_ITR': ITERS,
                     'T_END': T_END,
                     'DEVICE': DEVICE,
+                    'POP': POP,
                 },
                 virtual=False,
                 ableson_pop=False,

@@ -1,7 +1,7 @@
 # File Name: training.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 12:49P EDT
-# Last Modified: Wed Nov 29, 2023 | 10:07P EST
+# Last Modified: Fri Dec 15, 2023 | 11:49P EST
 
 """This file defines the functions used for network training. These functions
 are used in classification.py"""
@@ -19,7 +19,7 @@ from scipy.optimize import differential_evolution
 from torchviz import make_dot
 from torch.nn.functional import (binary_cross_entropy_with_logits, mse_loss,
                                  l1_loss)
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import ConcatDataset, DataLoader, Dataset
 from torchdiffeq import odeint_adjoint
 from torchcubicspline import (natural_cubic_spline_coeffs, NaturalCubicSpline)
 
@@ -57,6 +57,8 @@ DECAY: float = 0.
 OPT_RESET: int = 0
 ATOL: float = 0.
 RTOL: float = 0.
+ADJOINT_ATOL: float = 0.
+ADJOINT_RTOL: float = 0.
 
 # Training data selection parameters
 PATIENT_GROUPS: list = []
@@ -196,6 +198,45 @@ def load_data(virtual: bool=True, pop_number: int=0,
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE
         )
+    elif not virtual and control_combination and patient_groups[1]=='MDD':
+        # Pretty annoying training with non-augmented data from both labs,
+        #  I'm just going to load the raw data then mask it to remove the
+        #  test patients (and I'll do the opposite mask when testing)
+        nelson_control = NelsonData(
+            patient_groups=[patient_groups[0]],
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+        )
+        nelson_mdd = NelsonData(
+            patient_groups=['Atypical', 'Melancholic', 'Neither'],
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+        )
+        ableson_control = AblesonData(
+            patient_groups=[patient_groups[0]],
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+        )
+        ableson_mdd = AblesonData(
+            patient_groups=[patient_groups[1]],
+            normalize_standardize=NORMALIZE_STANDARDIZE,
+        )
+
+        control_dataset_tmp = ConcatDataset((nelson_control, ableson_control))
+        mdd_dataset_tmp = ConcatDataset((nelson_mdd, ableson_mdd))
+
+        control_mask = [i not in control_combination for i in range(len(control_dataset_tmp))]
+        mdd_mask = [i not in mdd_combination for i in range(len(mdd_dataset_tmp))]
+
+        # Pretty frustrating that Datasets can't just handle masks as indices
+        control_dataset = []
+        for i in range(len(control_dataset_tmp)):
+            if control_mask[i]:
+                control_dataset.append(control_dataset_tmp[i])
+        mdd_dataset = []
+        for i in range(len(mdd_dataset_tmp)):
+            if mdd_mask[i]:
+                mdd_dataset.append(mdd_dataset_tmp[i])
+
+        dataset = ConcatDataset((control_dataset, mdd_dataset))
+
     elif not virtual and control_combination:
         dataset = NelsonData(
             patient_groups=patient_groups,
@@ -306,7 +347,8 @@ def model_init(info: dict):
         return NeuralCDE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
             t_interval=t_eval.contiguous() if not CLASSIFY else torch.tensor((0,1)),
-            device=DEVICE, dropout=DROPOUT, prediction=not CLASSIFY
+            device=DEVICE, dropout=DROPOUT, prediction=not CLASSIFY, atol=ATOL,
+            rtol=RTOL, adjoint_atol=ADJOINT_ATOL, adjoint_rtol=ADJOINT_RTOL,
         ).double()
     elif NETWORK_TYPE == 'NODE':
         return NeuralODE(
@@ -727,13 +769,18 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
         data = data.to(DEVICE)
         labels = labels.to(DEVICE) if CLASSIFY else data
         y0 = data[:,0,:].to(DEVICE)
-
+        # model = model.double()
+        # readout = readout.double()
+        # data = data.double()
+        # labels = labels.double()
+        # t_eval = t_eval.double()
         # Zero the gradient from the previous data
         optimizer.zero_grad()
 
         # Compute the forward direction of the NODE
         pred_y = odeint_adjoint(
-            model, y0, t_eval, atol=ATOL, rtol=RTOL, method='dopri5'
+            model, y0, t_eval, atol=ATOL, rtol=RTOL, method='rk4',
+            adjoint_atol=ADJOINT_ATOL, adjoint_rtol=ADJOINT_RTOL,
         )
         # Compute the forward direction of the NODE with the dense domain for
         #  use in the mechanistic loss
@@ -750,7 +797,6 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
         pred_y = readout(pred_y)[-1].squeeze(-1) if CLASSIFY else pred_y.squeeze(-1)
 
         # Compute the loss based on the results
-        # set_trace()
         output = loss(pred_y, labels, dense_pred_y=pred_y, domain=t_eval, params=params)
 
         # This happens in place, so we don't need to return loss_over_time

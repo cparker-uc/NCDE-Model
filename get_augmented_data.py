@@ -51,7 +51,7 @@ class BaseVirtualPopulation(Dataset):
         self.combinations = ()
         if control_combination and mdd_combination:
             self.combinations = (control_combination, mdd_combination)
-        if pop_number:
+        elif pop_number:
             self.pop_number = pop_number
 
         self.no_test_patients = no_test_patients

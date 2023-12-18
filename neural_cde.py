@@ -132,7 +132,8 @@ class NeuralCDE(torch.nn.Module):
                  t_interval: torch.Tensor=torch.tensor((0,1), dtype=torch.float32),
                  device: torch.device=torch.device('cpu'),
                  interpolation: str='cubic', dropout: float=0.,
-                 prediction: bool=False, dense_domain: torch.Tensor=torch.linspace(0,140,50)):
+                 prediction: bool=False, dense_domain: torch.Tensor=torch.linspace(0,140,50),
+                 atol=1e-6, rtol=1e-4, adjoint_atol=1e-6, adjoint_rtol=1e-4):
         super().__init__()
 
         self.func = CDEFunc(input_channels, hidden_channels, device)
@@ -161,6 +162,11 @@ class NeuralCDE(torch.nn.Module):
         self.hidden_channels = hidden_channels
         self.input_channels = input_channels
 
+        self.atol = atol
+        self.rtol = rtol
+        self.adjoint_atol = adjoint_atol
+        self.adjoint_rtol = adjoint_rtol
+
     def forward(self, coeffs):
         """coeffs is the coefficients that describe the spline between the
         datapoints. In the case of cubic interpolation (the default), this
@@ -188,7 +194,13 @@ class NeuralCDE(torch.nn.Module):
             X=X,
             z0=z0,
             func=self.func,
-            t=self.dense_domain
+            t=self.dense_domain,
+            **{
+                'atol': self.atol, 'rtol': self.rtol,
+                'adjoint_atol': self.adjoint_atol,
+                'adjoint_rtol': self.adjoint_rtol,
+                'method': 'rk4', 'adjoint_method': 'rk4',
+            }
         )
         # cdeint returns the initial value and terminal value from the
         #  integration, we only need the terminal
