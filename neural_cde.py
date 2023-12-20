@@ -194,7 +194,7 @@ class NeuralCDE(torch.nn.Module):
             X=X,
             z0=z0,
             func=self.func,
-            t=self.dense_domain,
+            t=self.t_interval,
             **{
                 'atol': self.atol, 'rtol': self.rtol,
                 'adjoint_atol': self.adjoint_atol,

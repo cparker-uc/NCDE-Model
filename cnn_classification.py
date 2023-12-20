@@ -1,7 +1,7 @@
 # File Name: cnn_classification.py
 # Author: Christopher Parker
 # Created: Fri Dec 01, 2023 | 10:50P EST
-# Last Modified: Thu Dec 14, 2023 | 01:15P EST
+# Last Modified: Tue Dec 19, 2023 | 10:50P EST
 
 
 """Use the CNN architecture to classify based on the weight matrices of
@@ -9,7 +9,7 @@ networks trained to fit the data"""
 
 ITERS = 100
 BATCH_SIZE = 1
-DIRECTORY = 'Network States/Individual Fittings'
+DIRECTORY = 'Network States/New Individual Fittings (11 nodes)'
 
 from copy import copy
 import os
@@ -19,6 +19,8 @@ from itertools import combinations
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, roc_auc_score, RocCurveDisplay
 from cnn import CNN, CNN_oldstyle
 
 class FittingWeights(Dataset):
@@ -41,7 +43,7 @@ class FittingWeights(Dataset):
 
 
 def main(combination):
-    model = CNN(1, 8, 16, 32, 3, stride=1, padding=1, batch_size=BATCH_SIZE)
+    model = CNN(1, 16, 16, 32, 3, stride=1, padding=1, batch_size=BATCH_SIZE)
     model = model.double()
     files = os.listdir(DIRECTORY)
     train_files = copy(files)
@@ -83,7 +85,8 @@ def main(combination):
             # random_noise *= noise_magnitude
             # data = data + random_noise
             optimizer.zero_grad()
-            pred_y = model(data)#.squeeze(-1)
+            pred_y = model(data)
+            pred_y = pred_y.squeeze(-1)
             loss = nn.functional.binary_cross_entropy_with_logits(pred_y, labels)
             loss.backward()
             optimizer.step()
@@ -96,27 +99,49 @@ def main(combination):
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
     count = 0
     idxs = []
+    combo_labels = torch.zeros((0,))
+    combo_pred_y = torch.zeros((0,))
     with torch.no_grad():
         for i, (data, labels) in enumerate(test_loader):
             pred_y = model(data)
             pred_y = nn.functional.sigmoid(pred_y)
+
+            combo_labels = torch.cat([combo_labels, labels], 0)
+            combo_pred_y = torch.cat([combo_pred_y, pred_y], 0)
+
             if abs(pred_y - labels) < 0.5:
                 idxs.append(i)
                 count += 1
-    return count, idxs
+    return count, idxs, combo_labels, combo_pred_y
 
 if __name__ == '__main__':
     counts = []
     correct_patients = []
+    all_labels = torch.zeros((0,))
+    all_pred_y = torch.zeros((0,))
     for idx, combination in enumerate(combinations(range(29), 3)):
         if idx % 1 == 0:
             print(f'Training for combination: {combination}')
-        [count, idxs] = main(combination)
+        [count, idxs, labels, pred_ys] = main(combination)
+        all_labels = torch.cat([all_labels, labels], 0)
+        all_pred_y = torch.cat([all_pred_y, pred_ys], 0)
         counts.append(count)
         print(f"\tCumulative Mean = {np.mean(counts)/3}")
         correct_patients.append(idxs)
+    [fpr, tpr, thresholds] = roc_curve(
+        all_labels, all_pred_y,
+    )
+    roc_auc = roc_auc_score(
+        all_labels, all_pred_y,
+    )
+    disp = RocCurveDisplay(
+        fpr=fpr, tpr=tpr, roc_auc=roc_auc,
+        estimator_name='Control vs Atypical'
+    )
+    disp.plot()
+    plt.show()
 
-    torch.save(counts, 'AtypicalCorrectCount_refit_NODES.txt')
-    torch.save(correct_patients, 'AtypicalCorrectPatients_refit_NODES.txt')
+    torch.save(counts, 'AtypicalCorrectCounts_newFits_batchsize3.txt')
+    torch.save(correct_patients, 'AtypicalCorrectPatients_newFits_batchsize3.txt')
 
     print(f"Overall success rate: {np.mean(counts)/3}")

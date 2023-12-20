@@ -6,6 +6,9 @@
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 import os
 from IPython.core.debugger import set_trace
 import torch
@@ -15,6 +18,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from copy import copy
+from sklearn.metrics import (roc_curve, roc_auc_score, accuracy_score,
+                             RocCurveDisplay)
 
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.nn.functional import binary_cross_entropy_with_logits, mse_loss
@@ -72,6 +77,11 @@ T_END: int = 0
 # Define the device with which to train networks
 DEVICE = torch.device('cpu')
 
+# Create tensors with all labels and predicted values for use in an
+#  overall ROC curve
+all_labels = torch.zeros((0,))
+all_pred_y = torch.zeros((0,))
+
 
 def test(hyperparameters: dict, virtual: bool=True,
          permutations: list=[], ctrl_range: list=[], mdd_range: list=[],
@@ -79,6 +89,7 @@ def test(hyperparameters: dict, virtual: bool=True,
          toy_data: bool=False):
     """Run the test procedure given the order of test patients withheld from
     the training datasets"""
+    global all_labels, all_pred_y
 
     # Loop over the constants passed in hyperparameters and set the values to
     #  the corresponding global variables
@@ -146,6 +157,23 @@ def test(hyperparameters: dict, virtual: bool=True,
                 raise ValueError(
                     "NETWORK_TYPE must be one of: NCDE, NODE or ANN"
                 )
+
+
+    fpr, tpr, thresholds = roc_curve(
+        all_labels,
+        all_pred_y,
+    )
+    roc_auc = roc_auc_score(
+        all_labels,
+        all_pred_y,
+    )
+    disp = RocCurveDisplay(
+        fpr=fpr, tpr=tpr, roc_auc=roc_auc,
+        estimator_name=f'Control vs {PATIENT_GROUPS[1]}'
+    )
+    disp.plot()
+    plt.show()
+
 
 def test_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
     """When we do not have a list of test patient groups, run a test on a
@@ -374,6 +402,7 @@ def classification_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict
     virtual = info.get('virtual', True)
     ableson_pop = info.get('ableson_pop', False)
     toy_data = info.get('toy_data', False)
+    global all_labels, all_pred_y
 
     # Create the Pandas DataFrame which we will write to an Excel sheet
     performance_df = pd.DataFrame(
@@ -544,6 +573,9 @@ def classification_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict
             pred_y = torch.sigmoid(pred_y)
             error = torch.abs(labels - pred_y)
 
+            all_labels = torch.cat([all_labels, labels], 0)
+            all_pred_y = torch.cat([all_pred_y, pred_y], 0)
+
             # Rounding the predicted y to see if it was successful
             rounded_y = torch.round(pred_y)
             success = [not y for y in torch.abs(labels - rounded_y)]
@@ -590,6 +622,7 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
     virtual = info.get('virtual', True)
     ableson_pop = info.get('ableson_pop', False)
     toy_data = info.get('toy_data', False)
+    global all_labels, all_pred_y
 
     # Create the Pandas DataFrame which we will write to an Excel sheet
     performance_df = pd.DataFrame(
@@ -642,7 +675,7 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
     index = tuple(tmp_index)
 
     # Set the directory name where the model state dictionaries are located
-    if not virtual and PATIENT_GROUPS[1] == 'MDD':
+    if not virtual and control_combination:
         directory = (
             f'Network States/'
             f'{"Classification" if CLASSIFY else "Prediction"}/'
@@ -734,7 +767,6 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
         model.load_state_dict(state_dict)
         readout = nn.Linear(OUTPUT_CHANNELS, 1).double()
         readout.load_state_dict(readout_state_dict)
-        readout = readout.to(torch.float32)
 
         # Pandas Series to allow us to insert the number of iterations for each
         #  group of predicitons only in the first row of the group
@@ -755,6 +787,8 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
             labels = labels.to(DEVICE) if CLASSIFY else data
             y0 = data[:,0,1:]
 
+            model = model.double()
+
             # Compute the forward direction of the NODE
             pred_y = odeint_adjoint(
                 model, y0, t_eval
@@ -773,6 +807,10 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
             #  layer with BCE (improved performance over running sigmoid then
             #  BCE with torch)
             pred_y = torch.sigmoid(pred_y)
+
+            all_labels = torch.cat([all_labels, labels], 0)
+            all_pred_y = torch.cat([all_pred_y, pred_y], 0)
+
             error = torch.abs(labels - pred_y)
 
             # Rounding the predicted y to see if it was successful
@@ -794,6 +832,7 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
                     'Iterations': iterations,
                     'Success': success,
                     'Prediction': pred_y,
+                    'Label': labels,
                     'Error': error,
                     'Cross Entropy Loss': cross_entropy_loss,
                     'Success %': success_pct
@@ -807,6 +846,7 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
                     tmp_df
                 ),
             )
+
     # Save the DataFrame to a file
     save_performance(performance_df, info)
 
@@ -2524,6 +2564,7 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
     mdd_combination = info.get('mdd_combination')
     by_lab = info.get('by_lab')
     toy_data = info.get('toy_data', False)
+    disp = info.get('disp', None)
 
     # Set the directory name based on which type of dataset was used for the
     #  training
@@ -2592,6 +2633,9 @@ def save_performance(performance_df: pd.DataFrame, info: dict):
         f'dropout{DROPOUT}.xlsx'
     )
 
+    if disp:
+        disp.plot()
+        plt.savefig(os.path.join(directory, filename[:-4]+'png'), dpi=300)
     with pd.ExcelWriter(os.path.join(directory, filename)) as writer:
         performance_df.to_excel(writer)
 

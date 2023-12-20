@@ -26,13 +26,15 @@ class CNN(nn.Module):
         self.linear = nn.Linear(11, 1)
         self.linear2 = nn.Linear(11, 1)
         # self.readout = nn.Linear(hidden_channels, 1)
-        self.readout = nn.Linear(968, 1)
+        self.readout = nn.Linear(1936, 1)
+
+        self.batch_size = batch_size
 
     def forward(self, x):
         x = self.conv1(x)
         # x = self.batchnorm1(x)
-        x = x.relu()
-        x = self.maxpool(x)
+        # x = x.relu()
+        # x = self.maxpool(x)
         x = x.relu()
         # x = self.conv2(x)
         # x = self.batchnorm2(x)
@@ -40,11 +42,13 @@ class CNN(nn.Module):
         # x = self.conv3(x)
         # x = self.batchnorm3(x)
         # x = x.relu()
+        x = self.maxpool(x)
+        x = x.relu()
         # x = self.linear(x)
         # x = x.relu().squeeze()
         # x = self.linear2(x)
         # x = x.relu().squeeze()
-        x = torch.flatten(x)
+        x = x.reshape(x.shape[0], -1)
         x = self.readout(x)
         # We don't use a final nonlinearity, since we will use the
         # binary cross entropy loss with logits function (which includes a

@@ -1,7 +1,7 @@
 # File Name: galerkin_node.py
 # Author: Christopher Parker
 # Created: Tue May 30, 2023 | 03:04P EDT
-# Last Modified: Mon Dec 11, 2023 | 07:12P EST
+# Last Modified: Tue Dec 19, 2023 | 10:01P EST
 
 "Root file for classification of augmented TSST or simulation data"
 
@@ -11,19 +11,19 @@ NETWORK_TYPE = 'NCDE' # NCDE, NODE, ANN or RNN
 # If using NCDE, should be the number of vars plus 1, since we include time
 # If using NODE, should just be the number of vars
 INPUT_CHANNELS = 3
-HDIM = 11
-OUTPUT_CHANNELS = 1
+HDIM = 32
+OUTPUT_CHANNELS = 3
 
 # Only necessary for RNN
 N_LAYERS = 1
 SEQ_LENGTH = 11
 
-CLASSIFY = True
+CLASSIFY = False
 MECHANISTIC = False
 
 # Training hyperparameters
-ITERS = 200
-SAVE_FREQ = 100
+ITERS = 5000
+SAVE_FREQ = 5000
 LR = 1e-3
 DECAY = 1e-6
 OPT_RESET = None
@@ -33,18 +33,18 @@ ADJOINT_ATOL = 1e-3
 ADJOINT_RTOL = 1e-3
 
 # Training data selection parameters
-POP = 'FullVPOP'
-PATIENT_GROUPS = ['Control', 'Neither'] # Only necessary for POP='NelsonOnly' or 'AblesonOnly'
-INDIVIDUAL_NUMBER = 0 # Same
+POP = 'NelsonOnly'
+PATIENT_GROUPS = ['Control'] # Only necessary for POP='NelsonOnly' or 'AblesonOnly'
+INDIVIDUAL_NUMBER = 1 # Same
 METHOD = 'Uniform'
-NORMALIZE_STANDARDIZE = 'StandardizeAll'
+NORMALIZE_STANDARDIZE = 'None'
 NOISE_MAGNITUDE = 0.05
 IRREGULAR_T_SAMPLES = False
 NUM_PER_PATIENT = 100
 POP_NUMBER = 0
-BATCH_SIZE = 5
+BATCH_SIZE = 200
 LABEL_SMOOTHING = 0
-DROPOUT = 0.0
+DROPOUT = 0
 CORT_ONLY = False
 # These variables determine which population groups to train/test using
 #  Should be 3 for both if using NelsonOnly data, 11 for control and 12 for MDD
@@ -142,7 +142,7 @@ if __name__ == "__main__":
     patient_groups = set_patient_groups(POP.lower())
     if POP.lower() not in ['toydata', 'ablesononly']:
         perms = PERMUTATIONS[POP.lower()]
-    elif POP.lower() == 'nelsononly' and not INDIVIDUAL_NUMBER:
+    if POP.lower() == 'nelsononly' and not INDIVIDUAL_NUMBER:
         match patient_groups[1]:
             case 'Atypical':
                 perms = [perms[0], perms[1]]
@@ -150,7 +150,9 @@ if __name__ == "__main__":
                 perms = [perms[0], perms[2]]
             case 'Neither':
                 perms = [perms[0], perms[3]]
-    else:
+    elif INDIVIDUAL_NUMBER:
+        perms = None
+    elif POP.lower() not in ['toydata', 'ablesononly', 'nelsononly', 'fullvpop', 'fullvpopbylab']:
         perms = None
         # If not using Python 3.11:
         # if patient_groups[1] == "Atypical":

@@ -198,7 +198,7 @@ def load_data(virtual: bool=True, pop_number: int=0,
             patient_groups=patient_groups,
             normalize_standardize=NORMALIZE_STANDARDIZE
         )
-    elif not virtual and control_combination and patient_groups[1]=='MDD':
+    elif not virtual and control_combination and len(patient_groups) > 1 and patient_groups[1]=='MDD':
         # Pretty annoying training with non-augmented data from both labs,
         #  I'm just going to load the raw data then mask it to remove the
         #  test patients (and I'll do the opposite mask when testing)
@@ -660,7 +660,7 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             data = data[...,[0,2,3]]
         # If we are using prediction mode instead of classification, we need
         #  the data and labels to be the same
-        data = data.double().to(DEVICE) if CLASSIFY else data[...,1:].double().to(DEVICE)
+        data = data.double().to(DEVICE)# if CLASSIFY else data[...,1:].double().to(DEVICE)
         labels = labels.to(DEVICE) if CLASSIFY else data
         coeffs = torchcde.\
             hermite_cubic_coefficients_with_backward_differences(
