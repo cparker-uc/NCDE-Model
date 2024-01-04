@@ -7,7 +7,7 @@
 """Use the CNN architecture to classify based on the weight matrices of
 networks trained to fit the data"""
 
-ITERS = 100
+ITERS = 25
 BATCH_SIZE = 1
 DIRECTORY = 'Network States/New Individual Fittings (11 nodes)'
 
@@ -141,7 +141,7 @@ if __name__ == '__main__':
     disp.plot()
     plt.show()
 
-    torch.save(counts, 'AtypicalCorrectCounts_newFits_batchsize3.txt')
-    torch.save(correct_patients, 'AtypicalCorrectPatients_newFits_batchsize3.txt')
+    torch.save(counts, 'AtypicalCorrectCounts_newFits_batchsize1_25iter.txt')
+    torch.save(correct_patients, 'AtypicalCorrectPatients_newFits_batchsize1_25iter.txt')
 
     print(f"Overall success rate: {np.mean(counts)/3}")

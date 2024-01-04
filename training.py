@@ -342,6 +342,7 @@ def model_init(info: dict):
     toy_data = info.get('toy_data', False)
     t_steps = info.get('t_steps', 11)
     t_eval = info.get('t_eval', [0,1])
+    t_eval = torch.linspace(0, 140, 1000)
 
     if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
         return NeuralCDE(
@@ -660,11 +661,12 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
             data = data[...,[0,2,3]]
         # If we are using prediction mode instead of classification, we need
         #  the data and labels to be the same
-        data = data.double().to(DEVICE)# if CLASSIFY else data[...,1:].double().to(DEVICE)
+        t_eval = data[0,:,0]
+        data = data.double().to(DEVICE) if CLASSIFY else data[...,1:].double().to(DEVICE)
         labels = labels.to(DEVICE) if CLASSIFY else data
         coeffs = torchcde.\
             hermite_cubic_coefficients_with_backward_differences(
-                data, t=data[0,:,0]
+                data, t=t_eval
             )
 
         # Zero the gradient from the previous data
@@ -673,10 +675,15 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         # Compute the forward direction of the NCDE
         pred_y = model(coeffs).squeeze(-1)
 
-        # Compute the loss based on the results
-        output = loss(pred_y, labels, domain=domain)
+        # for using only the datapoints for the data loss, rather than a spline
+        def find_nearest(array, value):
+            idx = (torch.abs(array-value)).argmin()
+            return idx
 
-        # This happens in place, so we don't need to return loss_over_time
+        pred_y_datapoints = pred_y[:,[find_nearest(torch.linspace(0,140,1000), t) for t in t_eval.squeeze()],...]
+        # Compute the loss based on the results
+        output = loss(pred_y_datapoints, labels, domain=domain)
+
         loss_over_time.append((j, output.item()))
 
         # Backpropagate through the adjoint of the NODE to compute gradients
@@ -779,7 +786,7 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
 
         # Compute the forward direction of the NODE
         pred_y = odeint_adjoint(
-            model, y0, t_eval, atol=ATOL, rtol=RTOL, method='rk4',
+            model, y0, t_eval, atol=ATOL, rtol=RTOL, method='dopri5',
             adjoint_atol=ADJOINT_ATOL, adjoint_rtol=ADJOINT_RTOL,
         )
         # Compute the forward direction of the NODE with the dense domain for
@@ -982,9 +989,9 @@ def rnn_training_epoch_mech(itr: int, loader: DataLoader, model: RNN,
         # pred_y = model(data_domain.view(-1,1)).squeeze()
 
         # for using only the datapoints for the data loss, rather than a spline
-        # def find_nearest(array, value):
-        #     idx = (torch.abs(array-value)).argmin()
-        #     return idx
+        def find_nearest(array, value):
+            idx = (torch.abs(array-value)).argmin()
+            return idx
 
         # Repeat for the dense predictions
         pred_y = model(domain.view(-1,1))

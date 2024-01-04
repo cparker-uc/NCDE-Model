@@ -1426,27 +1426,25 @@ def prediction_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
         #  state
         state_dict = torch.load(state_filepath, map_location=DEVICE)
         model.load_state_dict(state_dict)
-
-        # Pandas Series to allow us to insert the number of iterations for each
-        #  group of predicitons only in the first row of the group
-        iterations = pd.Series((itr*SAVE_FREQ,), index=(index[0],))
+        model = model.double()
 
         # Loop through the test patients
-        for (data, labels) in loader:
+        for (data, _) in loader:
+            data = data.double()
             for i, pt in enumerate(data):
+                data_orig = pt
                 if INDIVIDUAL_NUMBER and len(PATIENT_GROUPS) == 1:
-                    pt = pt.double().view(1,t_steps,-1)
+                    pt = pt.double().view(1,11,-1)
+                    pt = pt[...,1:]
                 # Ensure the data is only CORT if CORT_ONLY, and that the data and
                 #  labels are loaded into the proper device memory
-                data_orig = pt
                 if CORT_ONLY:
                     pt = pt[...,[0,2]]
                 if toy_data and INPUT_CHANNELS == 3:
                     pt = pt[...,[0,2,3]]
                 pt = pt.to(DEVICE)
-                labels = labels.to(DEVICE) if CLASSIFY else pt
                 coeffs = torchcde.\
-                    hermite_cubic_coefficients_with_backward_differences(data)
+                    hermite_cubic_coefficients_with_backward_differences(pt)
 
                 pred_y = model(coeffs).squeeze(-1)
 
@@ -1456,7 +1454,7 @@ def prediction_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                     patient_id = f'MDD Patient {index[i]}'
 
                 # Graph the results
-                graph_results(pred_y, data_orig, patient_id, itr, info)
+                graph_results(pred_y, torch.linspace(0, 140, 1000), data_orig, patient_id, itr, info)
 
 
 def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):

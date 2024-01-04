@@ -132,7 +132,7 @@ class NeuralCDE(torch.nn.Module):
                  t_interval: torch.Tensor=torch.tensor((0,1), dtype=torch.float32),
                  device: torch.device=torch.device('cpu'),
                  interpolation: str='cubic', dropout: float=0.,
-                 prediction: bool=False, dense_domain: torch.Tensor=torch.linspace(0,140,50),
+                 prediction: bool=False, dense_domain: torch.Tensor=torch.linspace(0,140,1000),
                  atol=1e-6, rtol=1e-4, adjoint_atol=1e-6, adjoint_rtol=1e-4):
         super().__init__()
 
@@ -194,7 +194,7 @@ class NeuralCDE(torch.nn.Module):
             X=X,
             z0=z0,
             func=self.func,
-            t=self.t_interval,
+            t=self.dense_domain,
             **{
                 'atol': self.atol, 'rtol': self.rtol,
                 'adjoint_atol': self.adjoint_atol,

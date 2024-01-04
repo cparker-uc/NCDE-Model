@@ -6,13 +6,13 @@
 "Root file for classification of augmented TSST or simulation data"
 
 # Network architecture parameters
-NETWORK_TYPE = 'NCDE' # NCDE, NODE, ANN or RNN
+NETWORK_TYPE = 'NODE' # NCDE, NODE, ANN or RNN
 # Should be 40 for Toy dataset or 22 for others if using ANN or RNN
 # If using NCDE, should be the number of vars plus 1, since we include time
 # If using NODE, should just be the number of vars
-INPUT_CHANNELS = 3
+INPUT_CHANNELS = 2
 HDIM = 32
-OUTPUT_CHANNELS = 3
+OUTPUT_CHANNELS = 2
 
 # Only necessary for RNN
 N_LAYERS = 1
@@ -22,15 +22,15 @@ CLASSIFY = False
 MECHANISTIC = False
 
 # Training hyperparameters
-ITERS = 5000
-SAVE_FREQ = 5000
+ITERS = 50000
+SAVE_FREQ = 10000
 LR = 1e-3
 DECAY = 1e-6
 OPT_RESET = None
-ATOL = 1e-6
-RTOL = 1e-4
-ADJOINT_ATOL = 1e-3
-ADJOINT_RTOL = 1e-3
+ATOL = 1e-9
+RTOL = 1e-6
+ADJOINT_ATOL = 1e-9
+ADJOINT_RTOL = 1e-6
 
 # Training data selection parameters
 POP = 'NelsonOnly'
