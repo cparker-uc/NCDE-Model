@@ -7,9 +7,9 @@
 """Use the CNN architecture to classify based on the weight matrices of
 networks trained to fit the data"""
 
-ITERS = 25
+ITERS = 50
 BATCH_SIZE = 1
-DIRECTORY = 'Network States/New Individual Fittings (11 nodes)'
+DIRECTORY = 'Network States/Best Fittings by Loss for Each Patient'
 
 from copy import copy
 import os
@@ -21,7 +21,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, roc_auc_score, RocCurveDisplay
-from cnn import CNN, CNN_oldstyle
+from cnn import CNN
 
 class FittingWeights(Dataset):
     def __init__(self, directory, file_list):
@@ -141,7 +141,7 @@ if __name__ == '__main__':
     disp.plot()
     plt.show()
 
-    torch.save(counts, 'AtypicalCorrectCounts_newFits_batchsize1_25iter.txt')
-    torch.save(correct_patients, 'AtypicalCorrectPatients_newFits_batchsize1_25iter.txt')
+    torch.save(counts, 'AtypicalCorrectCounts_bestFits_batchsize1_50iter.txt')
+    torch.save(correct_patients, 'AtypicalCorrectPatients_bestFits_batchsize1_50iter.txt')
 
     print(f"Overall success rate: {np.mean(counts)/3}")
