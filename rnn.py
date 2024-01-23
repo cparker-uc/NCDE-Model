@@ -32,8 +32,10 @@ class RNN(nn.Module):
     def forward(self, y):
         (y, _) = self.net(y)
         y = self.readout(y)
-        y[...,[1,2]] = y[...,[1,2]].relu()
-        y[...,[0,3]] = y[...,[0,3]].tanh()
+
+        if len(y.shape) > 1 and y.shape[-1] >= 3:
+            y[...,[1,2]] = y[...,[1,2]].relu()
+            y[...,[0,3]] = y[...,[0,3]].tanh()
         return y
 
 

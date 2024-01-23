@@ -1,7 +1,7 @@
 # File Name: testing.py
 # Author: Christopher Parker
 # Created: Fri Jul 21, 2023 | 04:30P EDT
-# Last Modified: Fri Dec 15, 2023 | 01:37P EST
+# Last Modified: Thu Jan 11, 2024 | 12:46P EST
 
 """Code for testing trained networks and saving summaries of classification
 success rates into Excel spreadsheets"""
@@ -173,7 +173,8 @@ def test(hyperparameters: dict, virtual: bool=True,
     )
     disp.plot()
     plt.show()
-
+    np.savetxt(f'{PATIENT_GROUPS[1]}_Augmented{virtual}_all_labels.txt', all_labels)
+    np.savetxt(f'{PATIENT_GROUPS[1]}_Augmented{virtual}_all_pred_y.txt', all_pred_y)
 
 def test_single(virtual: bool, ableson_pop: bool=False, toy_data: bool=False):
     """When we do not have a list of test patient groups, run a test on a
@@ -360,7 +361,7 @@ def model_init(info: dict):
     if NETWORK_TYPE in ('NCDE', 'NCDE_LBFGS'):
         return NeuralCDE(
             INPUT_CHANNELS, HDIM, OUTPUT_CHANNELS,
-            t_interval=torch.linspace(t_start, t_end, 1000),
+            t_interval=torch.tensor([0, 15, 30, 40, 50, 65, 80, 95, 110, 125, 140]),
             device=DEVICE, dropout=DROPOUT, prediction=not CLASSIFY
         ).double()
     if NETWORK_TYPE == 'NODE':
@@ -375,8 +376,8 @@ def model_init(info: dict):
                 device=DEVICE
             )
         return ANN(
-            INPUT_CHANNELS*t_steps, HDIM,
-            OUTPUT_CHANNELS*t_steps,
+            INPUT_CHANNELS*t_steps if not CLASSIFY and not MECHANISTIC else INPUT_CHANNELS, HDIM,
+            OUTPUT_CHANNELS*t_steps if not CLASSIFY and not MECHANISTIC else OUTPUT_CHANNELS,
             device=DEVICE,
         ).double()
     if NETWORK_TYPE == 'RNN':
@@ -765,6 +766,7 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
         state_dict = torch.load(state_filepath, map_location=DEVICE)
         readout_state_dict = torch.load(readout_filepath, map_location=DEVICE)
         model.load_state_dict(state_dict)
+        model = model.double()
         readout = nn.Linear(OUTPUT_CHANNELS, 1).double()
         readout.load_state_dict(readout_state_dict)
 
@@ -786,8 +788,6 @@ def classification_node_testing(model: NeuralCDE, loader: DataLoader, info: dict
             data = data.to(DEVICE)
             labels = labels.to(DEVICE) if CLASSIFY else data
             y0 = data[:,0,1:]
-
-            model = model.double()
 
             # Compute the forward direction of the NODE
             pred_y = odeint_adjoint(
@@ -862,6 +862,7 @@ def classification_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict)
     ableson_pop = info.get('ableson_pop', False)
     toy_data = info.get('toy_data', False)
     t_steps = info.get('t_steps', 11)
+    global all_labels, all_pred_y
 
     # Create the Pandas DataFrame which we will write to an Excel sheet
     performance_df = pd.DataFrame(
@@ -914,7 +915,16 @@ def classification_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict)
     index = tuple(tmp_index)
 
     # Set the directory name where the model state dictionaries are located
-    if not virtual:
+    if not virtual and control_combination:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    elif not virtual:
         directory = (
             f'Network States/'
             f'{"Classification" if CLASSIFY else "Prediction"}/'
@@ -989,6 +999,7 @@ def classification_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict)
         #  state
         state_dict = torch.load(state_filepath, map_location=DEVICE)
         model.load_state_dict(state_dict)
+        model = model.double()
 
         # Pandas Series to allow us to insert the number of iterations for each
         #  group of predicitons only in the first row of the group
@@ -1007,16 +1018,21 @@ def classification_ann_testing(model: NeuralCDE, loader: DataLoader, info: dict)
                 data = data[...,[2,3]]
             else:
                 data = data[...,1:]
-            data = data.to(DEVICE)
+            data = data.to(DEVICE).double()
             labels = labels.to(DEVICE) if CLASSIFY else data
 
             # We need to reshape the data to fit the ANN properly
             pred_y = model(
                 data.reshape(
                     batch_size_,
-                    INPUT_CHANNELS*t_steps)
-            ).squeeze(-1).reshape(-1, labels.size(1), labels.size(2))
+                    INPUT_CHANNELS*t_steps if not CLASSIFY and not MECHANISTIC else INPUT_CHANNELS)
+            ).squeeze(-1)
+            if len(labels.shape) == 2:
+                pred_y = pred_y.reshape(-1, labels.size(1), labels.size(2))
             output = loss(pred_y, labels)
+
+            all_labels = torch.cat([all_labels, labels], 0)
+            all_pred_y = torch.cat([all_pred_y, pred_y], 0)
 
             # We need to run pred_y through a sigmoid layer to check for
             #  success and error because when training we use
@@ -1073,6 +1089,7 @@ def classification_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict)
     ableson_pop = info.get('ableson_pop', False)
     toy_data = info.get('toy_data', False)
     t_steps = info.get('t_steps', 11)
+    global all_labels, all_pred_y
 
     # Create the Pandas DataFrame which we will write to an Excel sheet
     performance_df = pd.DataFrame(
@@ -1125,7 +1142,16 @@ def classification_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict)
     index = tuple(tmp_index)
 
     # Set the directory name where the model state dictionaries are located
-    if not virtual:
+    if not virtual and control_combination:
+        directory = (
+            f'Network States/'
+            f'{"Classification" if CLASSIFY else "Prediction"}/'
+            f'Control vs {PATIENT_GROUPS[1]}/'
+            f'{"Control" if not by_lab else "Nelson"} '
+            f'{ctrl_num} {control_combination}/'
+            f'{PATIENT_GROUPS[1] if not by_lab else "Ableson"} {mdd_num} {mdd_combination}/'
+        )
+    elif not virtual:
         directory = (
             f'Network States/'
             f'{"Classification" if CLASSIFY else "Prediction"}/'
@@ -1203,10 +1229,10 @@ def classification_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict)
         # Load the state dictionary from the file and set the model to that
         #  state
         state_dict = torch.load(state_filepath, map_location=DEVICE)
-        readout_state_dict = torch.load(readout_filepath, map_location=DEVICE)
+        # readout_state_dict = torch.load(readout_filepath, map_location=DEVICE)
         model.load_state_dict(state_dict)
-        readout = nn.Linear(HDIM, 1).double()
-        readout.load_state_dict(readout_state_dict)
+        # readout = nn.Linear(HDIM, 1).double()
+        # readout.load_state_dict(readout_state_dict)
 
         # Pandas Series to allow us to insert the number of iterations for each
         #  group of predicitons only in the first row of the group
@@ -1225,16 +1251,17 @@ def classification_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict)
                 data = data[...,[2,3]]
             else:
                 data = data[...,1:]
-            data = data.to(DEVICE)
+            data = data.to(DEVICE).double()
             labels = labels.to(DEVICE) if CLASSIFY else data
 
             # We need to reshape the data to fit the ANN properly
             pred_y = model(
                 data.reshape(
                     batch_size_,
-                    INPUT_CHANNELS*t_steps)
+                    INPUT_CHANNELS*t_steps if not CLASSIFY and not MECHANISTIC else INPUT_CHANNELS)
             )
-            pred_y = readout(pred_y).squeeze(-1).reshape(-1, labels.size(1), labels.size(2))
+            # pred_y = readout(pred_y).squeeze(-1).reshape(-1, labels.size(1), labels.size(2))
+            pred_y = pred_y.squeeze(-1)
 
             output = loss(pred_y, labels)
 
@@ -1245,6 +1272,9 @@ def classification_rnn_testing(model: NeuralCDE, loader: DataLoader, info: dict)
             #  BCE with torch)
             pred_y = torch.sigmoid(pred_y)
             error = torch.abs(labels - pred_y)
+
+            all_labels = torch.cat([all_labels, labels], 0)
+            all_pred_y = torch.cat([all_pred_y, pred_y], 0)
 
             # Rounding the predicted y to see if it was successful
             rounded_y = torch.round(pred_y)
@@ -1443,18 +1473,29 @@ def prediction_ncde_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                 if toy_data and INPUT_CHANNELS == 3:
                     pt = pt[...,[0,2,3]]
                 pt = pt.to(DEVICE)
+                t_tensor = data_orig[...,0]
                 coeffs = torchcde.\
-                    hermite_cubic_coefficients_with_backward_differences(pt)
+                    hermite_cubic_coefficients_with_backward_differences(
+                        pt,
+                        t=t_tensor
+                    )
 
-                pred_y = model(coeffs).squeeze(-1)
+                pred_y = model(coeffs).squeeze()
+
+                dense_t_tensor = torch.linspace(0, 140, 1000).contiguous()
+                # path = torchcde.CubicSpline(coeffs, t=t_tensor)
+                # path_y = path.evaluate(dense_t_tensor)
+                # dense_coeffs = torchcde.hermite_cubic_coefficients_with_backward_differences(path_y, t=dense_t_tensor)
+                # dense_pred_y = model(dense_coeffs).squeeze()
 
                 if i < len(index)/2:
                     patient_id = f'Control Patient {index[i]}'
                 else:
                     patient_id = f'MDD Patient {index[i]}'
 
+                np.savetxt(f'NCDE_pred_y_{patient_id}.txt', pred_y)
                 # Graph the results
-                graph_results(pred_y, torch.linspace(0, 140, 1000), data_orig, patient_id, itr, info)
+                graph_results(pred_y, dense_t_tensor, data_orig, patient_id, itr, info)
 
 
 def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
@@ -1628,6 +1669,7 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
         #  state
         state_dict = torch.load(state_filepath, map_location=DEVICE)
         model.load_state_dict(state_dict)
+        model = model.double()
 
         # Loop through the test patients
         for (data, labels) in loader:
@@ -1654,12 +1696,15 @@ def prediction_node_testing(model: NeuralCDE, loader: DataLoader, info: dict):
                 # Compute the forward direction of the NODE
                 pred_y = odeint_adjoint(
                     model, y0, dense_t_eval
-                ).squeeze(-1)
+                ).squeeze()
+
 
                 if i < len(index)/2:
                     patient_id = f'Control Patient {index[i]}'
                 else:
                     patient_id = f'MDD Patient {index[i]}'
+
+                np.savetxt(f'NODE_pred_y_{patient_id}.txt', pred_y)
 
                 # Graph the results
                 graph_results(pred_y, dense_t_eval, data_orig, patient_id,

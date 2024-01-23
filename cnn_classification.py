@@ -7,9 +7,9 @@
 """Use the CNN architecture to classify based on the weight matrices of
 networks trained to fit the data"""
 
-ITERS = 50
+ITERS = 25
 BATCH_SIZE = 1
-DIRECTORY = 'Network States/Best Fittings by Loss for Each Patient'
+DIRECTORY = 'Network States/Old Individual Fittings (11 nodes)'
 
 from copy import copy
 import os
@@ -50,7 +50,7 @@ def main(combination):
     test_files = copy(files)
     # Remove any extraneous files
     for filename in files:
-        if filename[:3] not in ['Con', 'Aty']:#, 'Mel', 'Nei', 'MDD']:
+        if filename[:3] not in ['Con', 'Nei']:#, 'Mel', 'Nei', 'MDD']:
             train_files.remove(filename)
             test_files.remove(filename)
     # Remove the test patients
@@ -141,7 +141,9 @@ if __name__ == '__main__':
     disp.plot()
     plt.show()
 
-    torch.save(counts, 'AtypicalCorrectCounts_bestFits_batchsize1_50iter.txt')
-    torch.save(correct_patients, 'AtypicalCorrectPatients_bestFits_batchsize1_50iter.txt')
+    np.savetxt('CNN_FittingSet1_Neither_labels.txt', all_labels)
+    np.savetxt('CNN_FittingSet1_Neither_pred_y.txt', all_pred_y)
+    torch.save(counts, 'NeitherCorrectCounts_FittingSet1_batchsize1_25iter.txt')
+    torch.save(correct_patients, 'NeitherCorrectPatients_FittingSet1_batchsize1_25iter.txt')
 
     print(f"Overall success rate: {np.mean(counts)/3}")

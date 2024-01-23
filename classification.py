@@ -6,13 +6,15 @@
 "Root file for classification of augmented TSST or simulation data"
 
 # Network architecture parameters
-NETWORK_TYPE = 'NCDE' # NCDE, NODE, ANN or RNN
-# Should be 40 for Toy dataset or 22 for others if using ANN or RNN
+NETWORK_TYPE = 'RNN' # NCDE, NODE, ANN or RNN
+
+# INPUT_CHANNELS Should be 40 for Toy dataset or 22 for others if using ANN or
+#  RNN
 # If using NCDE, should be the number of vars plus 1, since we include time
 # If using NODE, should just be the number of vars
-INPUT_CHANNELS = 3
+INPUT_CHANNELS = 22
 HDIM = 32
-OUTPUT_CHANNELS = 1
+OUTPUT_CHANNELS = 1 # 1 for non-NODE classification, else same as INPUT_CHANNELS
 
 # Only necessary for RNN
 N_LAYERS = 1
@@ -42,7 +44,7 @@ NOISE_MAGNITUDE = 0.05
 IRREGULAR_T_SAMPLES = False
 NUM_PER_PATIENT = 100
 POP_NUMBER = 0
-BATCH_SIZE = 3
+BATCH_SIZE = 200
 LABEL_SMOOTHING = 0
 DROPOUT = 0.
 CORT_ONLY = False
@@ -199,7 +201,7 @@ if __name__ == "__main__":
                     'DEVICE': DEVICE,
                     'POP': POP,
                 },
-                virtual=False,
+                virtual=True,
                 ableson_pop=False,
                 permutations=perms,
                 ctrl_range=CTRL_RANGE,

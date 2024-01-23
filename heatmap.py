@@ -2,29 +2,44 @@
 # Description: 
 # Author: Christopher Parker
 # Created: Wed Dec 13, 2023 | 11:33P EST
-# Last Modified: Thu Dec 14, 2023 | 03:16P EST
+# Last Modified: Thu Jan 11, 2024 | 12:21P EST
 
 import torch
 import matplotlib.pyplot as plt
 
-control_model_state = torch.load('/Users/christopher/Documents/PTSD/NCDE Model.nosync/Network States/Old Individual Fittings (11 nodes)/ControlPatient0.txt')
-# atypical_model_state = torch.load('/Users/christopher/Documents/PTSD/NCDE Model.nosync/Network States/Old Individual Fittings (11 nodes)/AtypicalPatient0.txt')
+control_mat = torch.zeros((11,11))
+atypical_mat = torch.zeros((11,11))
+melancholic_mat = torch.zeros((11,11))
+neither_mat = torch.zeros((11,11))
+for i in range(15):
+    control_model_state = torch.load(f'/Users/christopher/Documents/PTSD/NCDE Model.nosync/Network States/Old Individual Fittings (11 nodes)/ControlPatient{i+1}.txt')
+    control_mat += control_model_state['hpa_net.2.weight']
 
-control_mat = control_model_state['hpa_net.2.weight']
-# atypical_mat = atypical_model_state['hpa_net.2.weight']
+    if i != 14:
+        atypical_model_state = torch.load(f'/Users/christopher/Documents/PTSD/NCDE Model.nosync/Network States/Old Individual Fittings (11 nodes)/AtypicalPatient{i+1}.txt')
+        atypical_mat += atypical_model_state['hpa_net.2.weight']
 
-fig, ax = plt.subplots()
-hmap = ax.imshow(control_mat, cmap='hot')
-fig.colorbar(hmap)
-ax.set_title('Nelson Control Patient 1 NODE Weight Matrix Heatmap')
-# fig, (ax1, ax2) = plt.subplots(ncols=2, gridspec_kw={'width_ratios': [1, 1.25]})
+        neither_model_state = torch.load(f'/Users/christopher/Documents/PTSD/NCDE Model.nosync/Network States/Old Individual Fittings (11 nodes)/NeitherPatient{i+1}.txt')
+        neither_mat += neither_model_state['hpa_net.2.weight']
 
-# control_hmap = ax1.imshow(control_mat, cmap='hot')
-# atypical_hmap = ax2.imshow(atypical_mat, cmap='hot')
-# fig.colorbar(atypical_hmap)
-# fig.suptitle('Nelson Control vs Atypical NODE Weight Heatmaps')
-# ax1.set_title('Control')
-# ax2.set_title('Atypical')
+    melancholic_model_state = torch.load(f'/Users/christopher/Documents/PTSD/NCDE Model.nosync/Network States/Old Individual Fittings (11 nodes)/MelancholicPatient{i+1}.txt')
+    melancholic_mat += melancholic_model_state['hpa_net.2.weight']
+
+atypical_mat /= 14
+control_mat /= 15
+melancholic_mat /= 15
+neither_mat /= 14
+
+fig, (ax1, ax2) = plt.subplots(ncols=2, gridspec_kw={'width_ratios': [1, 1.25]})
+
+control_hmap = ax1.imshow(control_mat, cmap='hot', vmin=-0.4, vmax=0.2)
+# atypical_hmap = ax2.imshow(atypical_mat, cmap='hot', vmin=-0.4, vmax=0.2)
+melancholic_hmap = ax2.imshow(melancholic_mat, cmap='hot', vmin=-0.4, vmax=0.2)
+# neither_hmap = ax2.imshow(neither_mat, cmap='hot', vmin=-0.4, vmax=0.2)
+fig.colorbar(melancholic_hmap)
+fig.suptitle('Nelson Control vs Melancholic NODE Weight Heatmaps')
+ax1.set_title('Control')
+ax2.set_title('Melancholic')
 
 plt.show()
 

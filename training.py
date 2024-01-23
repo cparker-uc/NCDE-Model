@@ -358,8 +358,8 @@ def model_init(info: dict):
         )
     elif NETWORK_TYPE == 'ANN':
         return ANN(
-            INPUT_CHANNELS*t_steps if not MECHANISTIC else INPUT_CHANNELS, HDIM,
-            OUTPUT_CHANNELS*t_steps if not MECHANISTIC else OUTPUT_CHANNELS,
+            INPUT_CHANNELS*t_steps if not CLASSIFY and not MECHANISTIC else INPUT_CHANNELS, HDIM,
+            OUTPUT_CHANNELS*t_steps if not CLASSIFY and not MECHANISTIC else OUTPUT_CHANNELS,
             device=DEVICE
         ).double()
     elif NETWORK_TYPE == 'RNN':
@@ -676,14 +676,17 @@ def ncde_training_epoch(itr: int, loader: DataLoader, model: NeuralCDE,
         pred_y = model(coeffs).squeeze(-1)
 
         # for using only the datapoints for the data loss, rather than a spline
-        def find_nearest(array, value):
-            idx = (torch.abs(array-value)).argmin()
-            return idx
+        if not CLASSIFY:
+            def find_nearest(array, value):
+                idx = (torch.abs(array-value)).argmin()
+                return idx
 
-        pred_y_datapoints = pred_y[:,[find_nearest(torch.linspace(0,140,1000), t) for t in t_eval.squeeze()],...]
-        # Compute the loss based on the results
-        output = loss(pred_y_datapoints, labels, domain=domain)
+            pred_y_datapoints = pred_y[:,[find_nearest(torch.linspace(0,140,1000), t) for t in t_eval.squeeze()],...]
+            # Compute the loss based on the results
+            output = loss(pred_y_datapoints, labels, domain=domain)
 
+        else:
+            output = loss(pred_y, labels)
         loss_over_time.append((j, output.item()))
 
         # Backpropagate through the adjoint of the NODE to compute gradients
@@ -761,6 +764,8 @@ def node_training_epoch(itr: int, loader: DataLoader, model: NeuralODE,
             data = data.squeeze(0)
         t_eval = data[0,:,0].view(-1).to(DEVICE)
         t_eval.requires_grad = True
+        model = model.double()
+        readout = readout.double()
 
         # Ensure we have assigned the data and labels to the correct
         #  processing device
@@ -922,7 +927,9 @@ def ann_training_epoch(itr: int, loader: DataLoader, model: ANN,
         #  shape matches the labels
         # We also need to reshape the output so that it has the number of
         #  columns necessary
-        pred_y = pred_y.squeeze(-1).reshape(-1, labels.size(1), labels.size(2))
+        pred_y = pred_y.squeeze(-1)
+        if len(labels.shape) == 2:
+            pred_y = pred_y.reshape(-1, labels.size(1), labels.size(2))
 
         # Compute the loss based on the results
         output = loss(
@@ -1062,9 +1069,10 @@ def rnn_training_epoch(itr: int, loader: DataLoader, model: RNN,
         )
         # Remove the extraneous dimension from the output of the network so the
         #  shape matches the labels
-        pred_y = readout(pred_y).squeeze(-1).reshape(
-            -1, labels.size(1), labels.size(2)
-        ) if CLASSIFY else pred_y.squeeze(-1)
+        # pred_y = readout(pred_y).squeeze(-1).reshape(
+        #     -1, labels.size(1), labels.size(2)
+        # ) if CLASSIFY else pred_y.squeeze(-1)
+        pred_y = pred_y.squeeze(-1)
 
         # Compute the loss based on the results
         output = loss(pred_y, labels, domain)

@@ -21,12 +21,12 @@ class ANN(nn.Module):
             nn.Linear(hdim, hdim),
             nn.Dropout(dropout),
             nn.Tanh(),
-            nn.Linear(hdim, hdim),
-            nn.Tanh(),
-            nn.Linear(hdim, hdim),
-            nn.Tanh(),
-            nn.Linear(hdim, hdim),
-            nn.Tanh(),
+            # nn.Linear(hdim, hdim),
+            # nn.Tanh(),
+            # nn.Linear(hdim, hdim),
+            # nn.Tanh(),
+            # nn.Linear(hdim, hdim),
+            # nn.Tanh(),
             nn.Linear(hdim, output_channels),
         ).to(device)
 

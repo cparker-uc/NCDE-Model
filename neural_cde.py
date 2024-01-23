@@ -1,7 +1,7 @@
 # File Name: neural_cde.py
 # Author: Christopher Parker
 # Created: Thu Jul 20, 2023 | 12:43P EDT
-# Last Modified: Fri Nov 24, 2023 | 09:36P EST
+# Last Modified: Wed Jan 10, 2024 | 12:25P EST
 
 """Classes for implementation of Neural CDE networks"""
 
@@ -129,7 +129,7 @@ class NeuralCDE(torch.nn.Module):
     so that when we call the instance of NeuralCDE it solves the system"""
     def __init__(self, input_channels: int, hidden_channels: int,
                  output_channels: int,
-                 t_interval: torch.Tensor=torch.tensor((0,1), dtype=torch.float32),
+                 t_interval: torch.Tensor=torch.tensor((0,1)),
                  device: torch.device=torch.device('cpu'),
                  interpolation: str='cubic', dropout: float=0.,
                  prediction: bool=False, dense_domain: torch.Tensor=torch.linspace(0,140,1000),
@@ -156,7 +156,7 @@ class NeuralCDE(torch.nn.Module):
         if self.prediction:
             self.t_interval = t_interval.to(device)
         else:
-            self.t_interval = torch.tensor((0,1), dtype=torch.float32)
+            self.t_interval = torch.tensor((0,1))
         self.dense_domain = dense_domain
 
         self.hidden_channels = hidden_channels
@@ -195,12 +195,9 @@ class NeuralCDE(torch.nn.Module):
             z0=z0,
             func=self.func,
             t=self.dense_domain,
-            **{
-                'atol': self.atol, 'rtol': self.rtol,
-                'adjoint_atol': self.adjoint_atol,
-                'adjoint_rtol': self.adjoint_rtol,
-                'method': 'rk4', 'adjoint_method': 'rk4',
-            }
+            # **{
+            #     'method': 'rk4', 'adjoint_method': 'rk4',
+            # }
         )
         # cdeint returns the initial value and terminal value from the
         #  integration, we only need the terminal
